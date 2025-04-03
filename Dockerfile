@@ -24,7 +24,8 @@ RUN apk add --no-cache \
 
 ENV GO111MODULE=on \
     CGO_ENABLED=1 \
-    GOOS=linux
+    GOOS=linux \
+    GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /build
 
@@ -34,7 +35,8 @@ RUN go mod download
 COPY . .
 COPY --from=builder /web/build ./web/build
 
-RUN go build -trimpath -ldflags "-s -w -X 'github.com/songquanpeng/one-api/common.Version=$(cat VERSION)' -linkmode external -extldflags '-static'" -o one-api
+# RUN go build -trimpath -ldflags "-s -w -X 'github.com/songquanpeng/one-api/common.Version=$(cat VERSION)' -linkmode external -extldflags '-static'" -o one-api
+RUN go build -trimpath -ldflags "-s -w -X 'common.Version=$(cat VERSION)' -linkmode external -extldflags '-static'" -o one-api
 
 FROM alpine:latest
 
