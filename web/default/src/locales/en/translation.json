@@ -432,7 +432,63 @@
         "date": "Date",
         "value": "Value"
       }
+    },
+    "form": {
+      "username": "Username",
+      "tokenName": "Token Name",
+      "startTimestamp": "Start Time",
+      "endTimestamp": "End Time",
+      "submit": "Query",
+      "validation": {
+        "required": "Please select username, token name and time range, then click query"
+      },
+      "interval": "Time Interval",
+      "timeInterval": {
+        "day": "Interval Unit/Day",
+        "hour": "Interval Unit/Hour"
+      },
+      "noTokens": "No related tokens found",
+      "selectUserFirst": "Please select a user first"
+    },
+    "tokenModelUsage": {
+      "formtitle": "Query User Usage",
+      "title": "User Usage Statistics",
+      "chartTitle": "User Usage Chart",
+      "noDataHint": "Please select a user and time range, then click query"
+    },
+    "tokenStats": {
+      "title": "Token Usage Statistics",
+      "tableTitle": "Token Usage Table",
+      "tokens": "tokens",
+      "usageCount": "Usage Count",
+      "timeRange": "Time Range",
+      "day": "Last Day",
+      "week": "Last Week",
+      "month": "Last Month",
+      "loading": "Loading data...",
+      "username": "Username",
+      "tokenName": "Token Name",
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "totalTokens": "Total Tokens",
+      "requestCount": "Request Count",
+      "lastUsed": "Last Used Time",
+      "unknownUser": "Unknown User",
+      "unknownToken": "Unknown Token",
+      "noData": "No data found",
+      "total": "Total"
+    },
+    "tokenUsageByName": {
+      "formTitle": "Query Token Usage",
+      "chartTitle": "Token Usage Chart",
+      "noDataHint": "No data found",
+      "startDate": "Start Date",
+      "endDate": "End Date",
+      "validation": {
+        "dateRequired": "Please select start and end dates"
+      }
     }
+
   },
   "setting": {
     "title": "System Settings",

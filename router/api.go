@@ -90,6 +90,8 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.GET("/", controller.GetAllTokens)
 			tokenRoute.GET("/search", controller.SearchTokens)
 			tokenRoute.GET("/:id", controller.GetToken)
+			tokenRoute.GET("/searchByUserId", controller.GetTokenByUserId)
+
 			tokenRoute.POST("/", controller.AddToken)
 			tokenRoute.PUT("/", controller.UpdateToken)
 			tokenRoute.DELETE("/:id", controller.DeleteToken)
@@ -112,6 +114,12 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), controller.SearchUserLogs)
+		logRoute.GET("/model/usage", middleware.AdminAuth(), controller.GetUserTokenModelUsage)
+		// 用户Token使用统计相关路由
+		logRoute.GET("/stats", middleware.AdminAuth(), controller.GetAllUserStatsHandler)
+		logRoute.GET("/user/stats", middleware.AdminAuth(), controller.GetUserTokenStatsHandler)
+		logRoute.GET("/token/usage-by-name", controller.GetTokenUsageByNameHandler)
+
 		groupRoute := apiRouter.Group("/group")
 		groupRoute.Use(middleware.AdminAuth())
 		{

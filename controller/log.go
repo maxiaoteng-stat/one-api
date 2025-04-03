@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"fmt"
+	"net/http"
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/ctxkey"
+	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/model"
-	"net/http"
-	"strconv"
 )
 
 func GetAllLogs(c *gin.Context) {
@@ -166,4 +169,160 @@ func DeleteHistoryLogs(c *gin.Context) {
 		"data":    count,
 	})
 	return
+}
+
+func GetUserTokenModelUsage(c *gin.Context) {
+	logger.Info(c.Request.Context(), "GetUserTokenModelUsage method start")
+	userId := c.Query("userId")
+	tokenName := c.Query("tokenName")
+	startTimestamp := c.Query("startTimestamp")
+	endTimestamp := c.Query("endTimestamp")
+
+	// 解析参数
+	var userIdInt int
+	var startTimestampInt, endTimestampInt int64
+	fmt.Sscanf(userId, "%d", &userIdInt)
+	fmt.Sscanf(startTimestamp, "%d", &startTimestampInt)
+	fmt.Sscanf(endTimestamp, "%d", &endTimestampInt)
+
+	usageData, err := model.GetUserTokenModelUsage(userIdInt, tokenName, startTimestampInt, endTimestampInt)
+	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %v", userId, tokenName, usageData))
+
+	if err != nil {
+		c.JSON(500, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    usageData,
+	})
+}
+
+// GetAllUserStatsHandler 获取所有用户的Token使用统计
+func GetAllUserStatsHandler(c *gin.Context) {
+	// 获取查询参数
+	startTimestampStr := c.Query("startTimestamp")
+	endTimestampStr := c.Query("endTimestamp")
+
+	// 转换时间戳参数
+	startTimestamp, err := strconv.ParseInt(startTimestampStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的开始时间戳",
+		})
+		return
+	}
+
+	endTimestamp, err := strconv.ParseInt(endTimestampStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的结束时间戳",
+		})
+		return
+	}
+
+	// 获取统计数据
+	stats, err := model.GetAllUserTokenStats(startTimestamp, endTimestamp)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "获取统计数据失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    stats,
+	})
+}
+
+// GetUserTokenStatsHandler 获取特定用户的Token使用统计
+func GetUserTokenStatsHandler(c *gin.Context) {
+	// 获取查询参数
+	userId := c.Query("userId")
+	tokenName := c.Query("tokenName")
+	startTimestampStr := c.Query("startTimestamp")
+	endTimestampStr := c.Query("endTimestamp")
+
+	// 转换用户ID
+	userIdInt, err := strconv.Atoi(userId)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的用户ID",
+		})
+		return
+	}
+
+	// 转换时间戳参数
+	startTimestamp, err := strconv.ParseInt(startTimestampStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的开始时间戳",
+		})
+		return
+	}
+
+	endTimestamp, err := strconv.ParseInt(endTimestampStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的结束时间戳",
+		})
+		return
+	}
+
+	// 获取用户的统计数据
+	stats, err := model.GetUserTokenStats(userIdInt, tokenName, startTimestamp, endTimestamp)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "获取用户统计数据失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    stats,
+	})
+}
+
+func GetTokenUsageByNameHandler(c *gin.Context) {
+	startTimestamp := c.Query("startTimestamp")
+	endTimestamp := c.Query("endTimestamp")
+	userId := c.Query("userId")
+	tokenName := c.Query("tokenName")
+
+	startTime, _ := strconv.ParseInt(startTimestamp, 10, 64)
+	endTime, _ := strconv.ParseInt(endTimestamp, 10, 64)
+
+	var userIdInt int
+	if userId != "" {
+		userIdInt, _ = strconv.Atoi(userId)
+	}
+
+	stats, err := model.GetTokenUsageByName(startTime, endTime, userIdInt, tokenName)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
 }

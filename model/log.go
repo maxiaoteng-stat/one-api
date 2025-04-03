@@ -249,3 +249,148 @@ func SearchLogsByDayAndModel(userId, start, end int) (LogStatistics []*LogStatis
 
 	return LogStatistics, err
 }
+
+// GetUserTokenModelUsage 统计单个用户token下各个模型在不同时间的使用量
+func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64) ([]struct {
+	ModelName    string `json:"model_name"`
+	CreatedAt    string `json:"created_at"`
+	Usage        int    `json:"usage"`
+	RequestCount int    `json:"request_count"`
+}, error) {
+	ifnull := "ifnull"
+	if common.UsingPostgreSQL {
+		ifnull = "COALESCE"
+	}
+
+	var results []struct {
+		ModelName    string `json:"model_name"`
+		CreatedAt    string `json:"created_at"`
+		Usage        int    `json:"usage"`
+		RequestCount int    `json:"request_count"`
+	}
+
+	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
+		"model_name, date_format(from_unixtime(created_at), '%%Y-%%m-%%d %%H:%%i:%%s') as created_at, "+
+			"%s(sum(prompt_tokens + completion_tokens),0) as `usage`, COUNT(1) as request_count",
+		ifnull))
+
+	// 构建查询条件
+	tx = tx.Where("user_id = ? AND token_name = ?", userId, tokenName)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	// 分组并执行查询
+	err := tx.Group("model_name, DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:%i:%s')").
+		Scan(&results).Error
+
+	return results, err
+}
+
+// TokenUsageStat 表示Token使用统计的结构
+type TokenUsageStat struct {
+	Username         string `json:"username"`
+	TokenName        string `json:"token_name"`
+	TotalTokens      int    `json:"total_tokens"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	RequestCount     int    `json:"request_count"`
+	LastUsedTime     int64  `json:"last_used_time"`
+}
+
+// GetAllUserTokenStats 获取所有用户的Token使用统计
+func GetAllUserTokenStats(startTimestamp, endTimestamp int64) ([]TokenUsageStat, error) {
+	ifnull := "ifnull"
+	if common.UsingPostgreSQL {
+		ifnull = "COALESCE"
+	}
+
+	// 使用链式方法构建查询
+	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
+		"username, token_name, "+
+			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
+			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
+			"%s(sum(completion_tokens),0) as completion_tokens, "+
+			"COUNT(id) as request_count, "+
+			"MAX(created_at) as last_used_time",
+		ifnull, ifnull, ifnull))
+
+	// 构建查询条件
+	tx = tx.Where("type = ? AND created_at BETWEEN ? AND ?", LogTypeConsume, startTimestamp, endTimestamp)
+
+	// 分组并排序
+	tx = tx.Group("username, token_name").Order("total_tokens DESC")
+
+	// 执行查询
+	var stats []TokenUsageStat
+	err := tx.Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// GetUserTokenStats 获取特定用户的Token使用统计
+func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestamp int64) ([]TokenUsageStat, error) {
+	ifnull := "ifnull"
+	if common.UsingPostgreSQL {
+		ifnull = "COALESCE"
+	}
+
+	// 使用链式方法构建查询
+	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
+		"username, token_name, "+
+			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
+			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
+			"%s(sum(completion_tokens),0) as completion_tokens, "+
+			"COUNT(id) as request_count, "+
+			"MAX(created_at) as last_used_time",
+		ifnull, ifnull, ifnull))
+
+	// 构建查询条件
+	tx = tx.Where("user_id = ? AND type = ? AND token_name = ? AND created_at BETWEEN ? AND ?",
+		userId, LogTypeConsume, tokenName, startTimestamp, endTimestamp)
+
+	// 分组并排序
+	tx = tx.Group("username, token_name").Order("total_tokens DESC")
+
+	// 执行查询
+	var stats []TokenUsageStat
+	err := tx.Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// TokenUsageByNameStat 统计结构
+type TokenUsageByNameStat struct {
+	Username     string `json:"username"`
+	TokenName    string `json:"token_name"`
+	TotalTokens  int64  `json:"total_tokens"`
+	RequestCount int64  `json:"request_count"`
+}
+
+// GetTokenUsageByName 获取指定时间范围内的Token使用统计
+func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string) ([]TokenUsageByNameStat, error) {
+	var stats []TokenUsageByNameStat
+	query := DB.Table("logs").
+		Select("username, token_name, SUM(prompt_tokens + completion_tokens) as total_tokens, COUNT(1) as request_count").
+		Where("created_at BETWEEN ? AND ?", startTime, endTime).
+		Group("username, token_name")
+
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	err := query.Find(&stats).Error
+	return stats, err
+}

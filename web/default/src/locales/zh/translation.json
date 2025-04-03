@@ -432,6 +432,61 @@
         "date": "日期",
         "value": "数值"
       }
+    },
+    "form":{
+      "username": "用户名",
+      "tokenName": "Token名称",
+      "startTimestamp": "开始时间",
+      "endTimestamp": "结束时间",
+      "validation": {
+        "required": "请选择用户名,Token名称和时间范围后点击查询"
+      },
+      
+      "submit": "查询",
+      "interval": "时间间隔",
+      "timeInterval": {
+        "day": "间隔单位/天",
+        "hour": "间隔单位/时"
+      }
+    },
+    "tokenModelUsage": {
+      "formtitle": "查询用户使用情况",
+      "chartTitle": "用户使用统计图",
+      "tableTitle": "用户使用统计表",
+      "noDataHint": "请选择用户和时间范围后点击查询"
+    },
+    "tokenStats": {
+      "title": "Token使用统计",
+      "tableTitle": "Token使用统计表",
+      "tokens": "tokens",
+      "usageCount": "使用次数",
+      "timeRange": "时间范围",
+      "day": "最近一天",
+      "week": "最近一周",
+      "month": "最近一个月",
+      "loading": "加载数据中...",
+      "username": "用户名",
+      "tokenName": "Token名称",
+      "inputTokens": "输入Tokens",
+      "outputTokens": "输出Tokens",
+      "totalTokens": "总Tokens数",
+      "requestCount": "请求次数",
+      "lastUsed": "最近使用时间",
+      "unknownUser": "未知用户",
+      "unknownToken": "未知Token",
+      "noData": "没有找到相关数据",
+      "total": "总计"
+    },
+
+    "tokenUsageByName": {
+      "formTitle": "Token使用统计查询",
+      "chartTitle": "Token使用统计图",
+      "noDataHint": "暂无数据",
+      "startDate": "开始日期",
+      "endDate": "结束日期",
+      "validation": {
+        "dateRequired": "请选择开始和结束日期"
+      }
     }
   },
   "setting": {

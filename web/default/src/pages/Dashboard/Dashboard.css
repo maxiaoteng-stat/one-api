@@ -106,4 +106,39 @@
     border: none !important;
     box-shadow: none !important;
     padding: 1rem 0 !important;
+}
+
+/* 添加到现有的CSS文件中 */
+.ui.celled.table {
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid #e0e1e2;
+  margin-top: 10px;
+}
+
+.ui.celled.table thead th {
+  background-color: #f9f9fa;
+  color: #555;
+  font-weight: 500;
+  padding: 10px 14px;
+  border-bottom: 2px solid #e0e1e2;
+}
+
+.ui.celled.table tbody td {
+  padding: 8px 14px;
+  border-top: 1px solid #e0e1e2;
+}
+
+.ui.celled.table tfoot th {
+  font-weight: 600;
+  background-color: #f9f9fa;
+  padding: 10px 14px;
+}
+
+.chart-card .card-content {
+  padding: 1.25rem;
+}
+
+.ui.active.centered.inline.loader {
+  margin: 0 auto;
 } 

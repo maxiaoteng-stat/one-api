@@ -59,6 +59,18 @@ func SearchUserTokens(userId int, keyword string) (tokens []*Token, err error) {
 	return tokens, err
 }
 
+func SearchAllUserTokens(userId string) (tokens []*Token, err error) {
+	query := DB
+
+	// 只有当userId不为空时才应用user_id条件
+	if userId != "" {
+		query = query.Where("user_id = ?", userId)
+	}
+
+	err = query.Find(&tokens).Error
+	return tokens, err
+}
+
 func ValidateUserToken(key string) (token *Token, err error) {
 	if key == "" {
 		return nil, errors.New("未提供令牌")
