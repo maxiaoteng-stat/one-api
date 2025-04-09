@@ -424,6 +424,15 @@
       "tokens": {
         "title": "Token Usage Trend",
         "tooltip": "Token Count"
+      },
+      "channelFilter": {
+        "title": "Channel Filter",
+        "channels_to_exclude": "Channels to Exclude",
+        "select_channels": "Select Channels to Exclude",
+        "clear_filters": "Reset",
+        "apply_filters": "Apply",
+        "currently_excluding": "Currently Excluding",
+        "channels": "Channels"
       }
     },
     "statistics": {
@@ -481,6 +490,7 @@
     "tokenUsageByName": {
       "formTitle": "Query Token Usage",
       "chartTitle": "Token Usage Chart",
+      "tableTitle": "Token Usage Table",
       "noDataHint": "No data found",
       "startDate": "Start Date",
       "endDate": "End Date",

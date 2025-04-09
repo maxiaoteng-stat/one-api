@@ -111,8 +111,9 @@ func GetLogsStat(c *gin.Context) {
 	tokenName := c.Query("token_name")
 	username := c.Query("username")
 	modelName := c.Query("model_name")
+	excludeModels := c.Query("excludeModels")
 	channel, _ := strconv.Atoi(c.Query("channel"))
-	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel)
+	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, excludeModels)
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -133,7 +134,8 @@ func GetLogsSelfStat(c *gin.Context) {
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
-	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel)
+	excludeModels := c.Query("excludeModels")
+	quotaNum := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, excludeModels)
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -177,6 +179,7 @@ func GetUserTokenModelUsage(c *gin.Context) {
 	tokenName := c.Query("tokenName")
 	startTimestamp := c.Query("startTimestamp")
 	endTimestamp := c.Query("endTimestamp")
+	excludeModels := c.Query("excludeModels")
 
 	// 解析参数
 	var userIdInt int
@@ -185,7 +188,7 @@ func GetUserTokenModelUsage(c *gin.Context) {
 	fmt.Sscanf(startTimestamp, "%d", &startTimestampInt)
 	fmt.Sscanf(endTimestamp, "%d", &endTimestampInt)
 
-	usageData, err := model.GetUserTokenModelUsage(userIdInt, tokenName, startTimestampInt, endTimestampInt)
+	usageData, err := model.GetUserTokenModelUsage(userIdInt, tokenName, startTimestampInt, endTimestampInt, excludeModels)
 	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %v", userId, tokenName, usageData))
 
 	if err != nil {
@@ -207,6 +210,7 @@ func GetAllUserStatsHandler(c *gin.Context) {
 	// 获取查询参数
 	startTimestampStr := c.Query("startTimestamp")
 	endTimestampStr := c.Query("endTimestamp")
+	excludeModels := c.Query("excludeModels")
 
 	// 转换时间戳参数
 	startTimestamp, err := strconv.ParseInt(startTimestampStr, 10, 64)
@@ -228,7 +232,7 @@ func GetAllUserStatsHandler(c *gin.Context) {
 	}
 
 	// 获取统计数据
-	stats, err := model.GetAllUserTokenStats(startTimestamp, endTimestamp)
+	stats, err := model.GetAllUserTokenStats(startTimestamp, endTimestamp, excludeModels)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -251,6 +255,7 @@ func GetUserTokenStatsHandler(c *gin.Context) {
 	tokenName := c.Query("tokenName")
 	startTimestampStr := c.Query("startTimestamp")
 	endTimestampStr := c.Query("endTimestamp")
+	excludeModels := c.Query("excludeModels")
 
 	// 转换用户ID
 	userIdInt, err := strconv.Atoi(userId)
@@ -282,7 +287,7 @@ func GetUserTokenStatsHandler(c *gin.Context) {
 	}
 
 	// 获取用户的统计数据
-	stats, err := model.GetUserTokenStats(userIdInt, tokenName, startTimestamp, endTimestamp)
+	stats, err := model.GetUserTokenStats(userIdInt, tokenName, startTimestamp, endTimestamp, excludeModels)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -303,6 +308,7 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 	endTimestamp := c.Query("endTimestamp")
 	userId := c.Query("userId")
 	tokenName := c.Query("tokenName")
+	excludeModels := c.Query("excludeModels")
 
 	startTime, _ := strconv.ParseInt(startTimestamp, 10, 64)
 	endTime, _ := strconv.ParseInt(endTimestamp, 10, 64)
@@ -312,7 +318,7 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 		userIdInt, _ = strconv.Atoi(userId)
 	}
 
-	stats, err := model.GetTokenUsageByName(startTime, endTime, userIdInt, tokenName)
+	stats, err := model.GetTokenUsageByName(startTime, endTime, userIdInt, tokenName, excludeModels)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

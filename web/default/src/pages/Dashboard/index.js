@@ -99,20 +99,40 @@ const Dashboard = () => {
     startDate: '',
     endDate: ''
   });
+  const [tokenDetailData, setTokenDetailData] = useState([]);
+  const [channels, setChannels] = useState([]);  // 所有渠道列表
+  const [filteredChannelIds, setFilteredChannelIds] = useState([]); // 要排除的渠道ID列表
+  const [selectedChannelIds, setSelectedChannelIds] = useState([]); // 临时选择的渠道ID
+  const [channelSearchValue, setChannelSearchValue] = useState(''); // 渠道搜索值
+  const [filteredChannels, setFilteredChannels] = useState([]); // 搜索后过滤的渠道列表
+  const [modelMappingValues, setModelMappingValues] = useState([]); // 要排除的模型列表
+  const [isChannelsInit,setIsChannelsInit] = useState(false);
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchChannels();
     fetchUsers();
-    fetchAllUserUsageStats();
-    fetchAllTokensFromLogs(); // 初始加载所有token
+    
+    // fetchDashboardData();
+    // fetchAllUserUsageStats();
+    // fetchAllTokensFromLogs();
   }, []);
+
+  useEffect(() => {
+
+    if(isChannelsInit){
+
+      fetchDashboardData();
+      fetchAllUserUsageStats();
+      fetchAllTokensFromLogs();
+    }
+  }, [modelMappingValues]);
 
   const handleUserSearch = (e, { value }) => {
     setUserSearchValue(value);
     if (value.trim() === '') {
       setFilteredUsers(users);
     } else {
-      const filtered = users.filter(user => 
+      const filtered = users.filter(user =>
         user.text.toLowerCase().includes(value.toLowerCase())
       );
       setFilteredUsers(filtered);
@@ -124,7 +144,7 @@ const Dashboard = () => {
     if (value.trim() === '') {
       setFilteredTokensByNameOptions(tokensByNameOptions);
     } else {
-      const filtered = tokensByNameOptions.filter(token => 
+      const filtered = tokensByNameOptions.filter(token =>
         token.text.toLowerCase().includes(value.toLowerCase())
       );
       setFilteredTokensByNameOptions(filtered);
@@ -136,7 +156,7 @@ const Dashboard = () => {
     if (value.trim() === '') {
       setFilteredTokenModelOptions(tokenModelOptions);
     } else {
-      const filtered = tokenModelOptions.filter(token => 
+      const filtered = tokenModelOptions.filter(token =>
         token.text.toLowerCase().includes(value.toLowerCase())
       );
       setFilteredTokenModelOptions(filtered);
@@ -150,7 +170,7 @@ const Dashboard = () => {
       userId: value,
       tokenName: '' // 重置 token 选择
     });
-    
+
     // 加载该用户的 token 到Model表单
     fetchUserTokens(value, 'model');
   };
@@ -172,7 +192,7 @@ const Dashboard = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
     // 验证所有必填字段
     if (!formValues.username || !formValues.tokenName || !formValues.startTimestamp || !formValues.endTimestamp) {
       // 使用 Semantic UI 的 Message 组件或其他提示方式
@@ -182,9 +202,9 @@ const Dashboard = () => {
 
     const startTimestamp = Math.floor(new Date(formValues.startTimestamp).getTime() / 1000);
     const endTimestamp = Math.floor(new Date(formValues.endTimestamp).getTime() / 1000);
-    
+
     fetchTokenUsageData(startTimestamp, endTimestamp);
-    
+
     if (formValues.userId && formValues.tokenName) {
       fetchUserTokenStats(formValues.userId, formValues.tokenName, startTimestamp, endTimestamp);
     }
@@ -193,10 +213,17 @@ const Dashboard = () => {
   const [tokenUsageData, setTokenUsageData] = useState({});
 
   const fetchTokenUsageData = async (startTimestamp, endTimestamp) => {
-    console.info("entry fetchTokenUsageData ~~~~~");
     const { userId, tokenName } = formValues;
     try {
-      const res = await API.get(`/api/log/model/usage?userId=${userId}&tokenName=${tokenName}&startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`);
+      // 构建基础URL
+      let url = `/api/log/model/usage?userId=${userId}&tokenName=${tokenName}&startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`;
+      
+      // 添加模型映射值作为筛选条件
+      if (modelMappingValues.length > 0) {
+        url += `&excludeModels=${modelMappingValues.join(',')}`;
+      }
+      
+      const res = await API.get(url);
       const { success, data } = res.data;
       if (success) {
         const normalizedData = Array.isArray(data) ? data : [];
@@ -258,10 +285,10 @@ const Dashboard = () => {
 
         if (hourlyData[key]) {
           modelNames.add(entry.model_name);
-          
+
           // 累加 token 使用量
           hourlyData[key][entry.model_name] = (hourlyData[key][entry.model_name] || 0) + entry.usage;
-          
+
           // 累加请求次数 (新增)
           const requestKey = `${entry.model_name}_count`;
           hourlyData[key][requestKey] = (hourlyData[key][requestKey] || 0) + entry.request_count;
@@ -290,7 +317,22 @@ const Dashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await axios.get('/api/user/dashboard');
+      // 构建基础URL
+      let url = '/api/user/dashboard';
+      
+      // 添加过滤参数
+      const params = [];
+      // 添加模型映射值作为筛选条件
+      console.info("modelMappingValues:", modelMappingValues);
+      if (modelMappingValues.length > 0) {
+        params.push(`excludeModels=${modelMappingValues.join(',')}`);
+      }
+      
+      // 组合URL
+      if (params.length > 0) {
+        url += `?${params.join('&')}`;
+      }      
+      const response = await axios.get(url);
       if (response.data.success) {
         const dashboardData = response.data.data || [];
         setData(dashboardData);
@@ -417,7 +459,7 @@ const Dashboard = () => {
       // 检查item.Day和item.ModelName是否都存在，且item.Day在timeData中有对应项
       if (item.Day && item.ModelName && timeData[item.Day]) {
         // 确保模型名称可以作为对象属性使用
-        timeData[item.Day][item.ModelName] = 
+        timeData[item.Day][item.ModelName] =
           (item.PromptTokens || 0) + (item.CompletionTokens || 0);
       } else {
         console.warn('Invalid data item:', item);
@@ -541,14 +583,14 @@ const Dashboard = () => {
           text: token.name || t('dashboard.form.unknownToken'),
           value: token.name || ''
         }));
-        
+
         // 根据表单类型更新对应的tokens状态
         if (formType === 'byName' || formType === 'both') {
           setTokensByNameOptions(formattedTokens);
           setFilteredTokensByNameOptions(formattedTokens);
           setTokenSearchValueByName('');
         }
-        
+
         if (formType === 'model' || formType === 'both') {
           setTokenModelOptions(formattedTokens);
           setFilteredTokenModelOptions(formattedTokens);
@@ -561,7 +603,7 @@ const Dashboard = () => {
         setTokensByNameOptions([]);
         setFilteredTokensByNameOptions([]);
       }
-      
+
       if (formType === 'model' || formType === 'both') {
         setTokenModelOptions([]);
         setFilteredTokenModelOptions([]);
@@ -581,7 +623,7 @@ const Dashboard = () => {
           text: token.name || t('dashboard.form.unknownToken'),
           value: token.name || ''
         }));
-        
+
         setTokensByNameOptions(formattedTokens);
         setFilteredTokensByNameOptions(formattedTokens);
         setTokenSearchValueByName('');
@@ -599,15 +641,25 @@ const Dashboard = () => {
     try {
       const endDate = new Date();
       const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 7); // 默认获取最近一周的数据
+      startDate.setDate(startDate.getDate() - 7);
       
       const startTimestamp = Math.floor(startDate.getTime() / 1000);
       const endTimestamp = Math.floor(endDate.getTime() / 1000);
       
-      const response = await API.get(`/api/log/stats?startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`);
+      // 构建基础URL
+      let url = `/api/log/stats?startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`;
+      
+
+      // 添加模型映射值作为筛选条件
+      if (modelMappingValues.length > 0) {
+        url += `&excludeModels=${modelMappingValues.join(',')}`;
+      }
+      
+      const response = await API.get(url);
       
       if (response.data.success) {
-        setUsageStats(response.data.data || []);
+        const filteredStats = (response.data.data || []).filter(item => item.username);
+        setUsageStats(filteredStats);
       } else {
         console.error('Failed to fetch usage stats:', response.data.message);
         setUsageStats([]);
@@ -624,10 +676,16 @@ const Dashboard = () => {
   const fetchUserTokenStats = async (userId, tokenName, startTimestamp, endTimestamp) => {
     setIsLoading(true);
     try {
-      const response = await API.get(
-        `/api/log/user/stats?userId=${userId}&tokenName=${tokenName}&startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`
-      );
+      // 构建基础URL
+      let url = `/api/log/user/stats?userId=${userId}&tokenName=${tokenName}&startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`;
       
+      // 添加模型映射值作为筛选条件
+      if (modelMappingValues.length > 0) {
+        url += `&excludeModels=${modelMappingValues.join(',')}`;
+      }
+
+      const response = await API.get(url);
+
       if (response.data.success) {
         setUsageStats(response.data.data || []);
       } else {
@@ -645,64 +703,83 @@ const Dashboard = () => {
   // 新增获取数据函数
   const fetchTokenUsageByName = async (startDate, endDate, username, tokenName) => {
     try {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);  // 设置为当天结束时间
+      const startTimestamp = Math.floor(new Date(startDate).setHours(0, 0, 0, 0) / 1000);
+      const endDateObj = new Date(endDate);
+      endDateObj.setDate(endDateObj.getDate() + 1);
+      endDateObj.setHours(0, 0, 0, 0);
+      const endTimestamp = Math.floor(endDateObj.getTime() / 1000);
+
+      // 构建基础URL
+      let url = `/api/log/token/usage-by-name?startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}`;
       
-      const startTimestamp = Math.floor(start.getTime() / 1000);
-      const endTimestamp = Math.floor(end.getTime() / 1000);
+      // 添加其他可选参数
+      if (username) {
+        url += `&userId=${username}`;
+      }
+      if (tokenName) {
+        url += `&tokenName=${tokenName}`;
+      }
       
-      const response = await API.get(`/api/log/token/usage-by-name?startTimestamp=${startTimestamp}&endTimestamp=${endTimestamp}${username ? `&userId=${username}` : ''}${tokenName ? `&tokenName=${tokenName}` : ''}`);
-      
+      // 添加模型映射值作为筛选条件
+      if (modelMappingValues.length > 0) {
+        url += `&excludeModels=${modelMappingValues.join(',')}`;
+      }
+
+      const response = await API.get(url);
+
       if (response.data.success) {
         const rawData = response.data.data || [];
-        
-        // 按token_name分组处理数据
+
+        // 过滤掉username为空的数据
+        const filteredData = rawData.filter(item => item.username);
+
+        // 为柱状图准备数据 - 保持原来的逻辑
         const tokenGroups = {};
         const userSet = new Set();
-        
-        // 第一步：收集所有用户名和token名称
-        rawData.forEach(item => {
-          const username = item.username || 'unknown';
-          userSet.add(username);
-          
+
+        // 收集所有用户名和token名称（仅包含有username的记录）
+        filteredData.forEach(item => {
+          userSet.add(item.username);
+
           if (!tokenGroups[item.token_name]) {
             tokenGroups[item.token_name] = {
               token_name: item.token_name
             };
           }
         });
-        
-        // 将Set转换为数组，方便后续使用
+
+        // 将Set转换为数组
         const userArray = Array.from(userSet);
-        
-        // 第二步：为每个token初始化每个用户的使用量为0
+
+        // 为每个token初始化每个用户的使用量为0
         Object.keys(tokenGroups).forEach(tokenName => {
           userArray.forEach(username => {
             tokenGroups[tokenName][username] = 0;
           });
         });
-        
-        // 第三步：填充实际数据
-        rawData.forEach(item => {
-          const username = item.username || 'unknown';
+
+        // 填充柱状图数据
+        filteredData.forEach(item => {
           if (tokenGroups[item.token_name]) {
-            tokenGroups[item.token_name][username] = parseInt(item.total_tokens) || 0;
+            tokenGroups[item.token_name][item.username] = parseInt(item.total_tokens) || 0;
             // 存储请求次数
-            tokenGroups[item.token_name][`${username}_count`] = parseInt(item.request_count) || 0;
+            tokenGroups[item.token_name][`${item.username}_count`] = parseInt(item.request_count) || 0;
           }
         });
-        
-        // 转换为数组形式，便于图表使用
-        const formattedData = Object.values(tokenGroups);
-        
-        setTokenUsageByNameData(formattedData);
+
+        // 为柱状图设置数据
+        setTokenUsageByNameData(Object.values(tokenGroups));
+
+        // 为表格准备详细数据 - 直接使用filteredData
+        setTokenDetailData(filteredData);
       } else {
         setTokenUsageByNameData([]);
+        setTokenDetailData([]);
       }
     } catch (error) {
       console.error('Failed to fetch token usage by name:', error);
       setTokenUsageByNameData([]);
+      setTokenDetailData([]);
     }
   };
 
@@ -710,19 +787,19 @@ const Dashboard = () => {
   const handleTokenUsageByNameSubmit = (e) => {
     e.preventDefault();
     const { startDate, endDate, username, tokenName } = tokenUsageByNameForm;
-    
+
     if (!startDate || !endDate) {
       alert(t('dashboard.form.validation.dateRequired'));
       return;
     }
-    
+
     fetchTokenUsageByName(startDate, endDate, username, tokenName);
   };
 
   // 修改用户选择处理函数
   const handleTokenUsageByNameUserSelect = (e, { value }) => {
     console.log('用户选择变更:', value); // 添加调试日志
-    
+
     // 当value为null或undefined时，表示用户点击了清除按钮
     if (!value && value !== 0) {
       setTokenUsageByNameForm({
@@ -731,12 +808,12 @@ const Dashboard = () => {
         userId: '',
         tokenName: '' // 同时清除token选择
       });
-      
+
       // 加载所有token
       fetchAllTokensFromLogs();
       return;
     }
-    
+
     // 正常选择用户的逻辑
     setTokenUsageByNameForm({
       ...tokenUsageByNameForm,
@@ -744,13 +821,199 @@ const Dashboard = () => {
       userId: value,
       tokenName: '' // 重置token选择
     });
-    
+
     // 加载该用户的token列表到ByName表单
     fetchUserTokens(value, 'byName');
   };
 
+  // 修改 fetchChannels 函数
+  const fetchChannels = async () => {
+    try {
+      const response = await API.get('/api/channel/');
+      if (response.data.success) {
+        const channelData = response.data.data || [];
+        
+        // 格式化渠道数据
+        const formattedChannels = channelData.map(channel => ({
+          key: channel.id,
+          text: channel.name || `Channel ${channel.id}`,
+          value: channel.id,
+          status: channel.status,
+          model_mapping: channel.model_mapping,
+          content: (
+            <div style={{ color: channel.status === 1 ? '#000' : '#999' }}>
+              <span style={{
+                display: 'inline-block',
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: channel.status === 1 ? '#21ba45' : '#ff4d4f',
+                marginRight: '8px'
+              }}/>
+              {channel.name || `Channel ${channel.id}`}
+            </div>
+          )
+        }));
+        
+        setChannels(formattedChannels);
+        setFilteredChannels(formattedChannels);
+        
+        // 获取所有非激活渠道ID
+        const inactiveChannelIds = channelData
+          .filter(channel => channel.status !== 1)
+          .map(channel => channel.id);
+
+        // 从 localStorage 获取保存的筛选设置
+        let savedFilters = [];
+        try {
+          const saved = localStorage.getItem('dashboard_filtered_channels');
+          if (saved) {
+            savedFilters = JSON.parse(saved);
+          }
+        } catch (e) {
+          console.error('Error parsing saved filters:', e);
+        }
+
+        // 合并保存的筛选和非激活渠道
+        const initialFilters = Array.from(new Set([...inactiveChannelIds, ...savedFilters]));
+        
+        setFilteredChannelIds(initialFilters);
+        setSelectedChannelIds(initialFilters);
+        
+        // 收集所有被过滤渠道的model_mapping中的值
+        collectModelMappingValues(channelData, initialFilters);
+        setIsChannelsInit(true)
+      }
+    } catch (error) {
+      console.error('Failed to fetch channels:', error);
+    }
+  };
+
+  // 新增函数: 收集所有模型映射值
+  const collectModelMappingValues = (channelData, filteredIds) => {
+    const mappingValues = [];
+    
+    channelData.forEach(channel => {
+      // 仅处理被过滤的渠道
+      if (filteredIds.includes(channel.id) && channel.model_mapping) {
+        try {
+          // 解析JSON字符串
+          const mapping = JSON.parse(channel.model_mapping);
+          // 收集所有映射中的值
+          Object.values(mapping).forEach(value => {
+            if (!mappingValues.includes(value)) {
+              mappingValues.push(value);
+            }
+          });
+        } catch (e) {
+          console.error(`Error parsing model_mapping for channel ${channel.id}:`, e);
+        }
+      }
+    });
+    
+    console.log('Collected model mapping values:', mappingValues);
+    setModelMappingValues(mappingValues);
+  };
+
+  // 处理渠道搜索
+  const handleChannelSearch = (e, { value }) => {
+    setChannelSearchValue(value);
+    if (value.trim() === '') {
+      setFilteredChannels(channels);
+    } else {
+      const filtered = channels.filter(channel => 
+        channel.text.toLowerCase().includes(value.toLowerCase())
+      );
+      setFilteredChannels(filtered);
+    }
+  };
+
+  // 处理临时渠道选择
+  const handleChannelSelect = (e, { value }) => {
+    setSelectedChannelIds(value);
+  };
+
+  // 应用筛选
+  const applyChannelFilters = () => {
+    setFilteredChannelIds(selectedChannelIds);
+    // 保存到 localStorage
+    localStorage.setItem('dashboard_filtered_channels', JSON.stringify(selectedChannelIds));
+    // 更新模型映射值
+    collectModelMappingValues(channels.map(c => ({
+      id: c.value,
+      model_mapping: c.model_mapping
+    })), selectedChannelIds);
+    // 重新加载数据
+    // fetchDashboardData();
+    // fetchAllUserUsageStats();
+  };
+
+  // 清除筛选条件
+  const clearChannelFilters = () => {
+    // 获取非激活渠道
+    const inactiveChannelIds = channels
+      .filter(channel => channel.status !== 1)
+      .map(channel => channel.value);
+      
+    setSelectedChannelIds(inactiveChannelIds);
+    setFilteredChannelIds(inactiveChannelIds);
+    // 更新 localStorage
+    localStorage.setItem('dashboard_filtered_channels', JSON.stringify(inactiveChannelIds));
+    // 重新加载数据
+    // fetchDashboardData();
+    // fetchAllUserUsageStats();
+  };
+
   return (
     <div className='dashboard-container'>
+
+      {/* 渠道筛选组件 */}
+      <Card fluid className='chart-card'>
+        <Card.Content>
+          <Card.Header>{t('dashboard.charts.channelFilter.title')}</Card.Header>
+          <Form style={{ marginTop: '0.5rem' }}>
+            <Form.Group widths='equal'>
+              <Form.Field>
+                <label>{t('dashboard.charts.channelFilter.channels_to_exclude')}</label>
+                <Dropdown
+                  placeholder={t('dashboard.charts.channelFilter.select_channels')}
+                  fluid
+                  multiple
+                  search
+                  selection
+                  options={filteredChannels}
+                  value={selectedChannelIds}
+                  onChange={handleChannelSelect}
+                  onSearchChange={handleChannelSearch}
+                  searchQuery={channelSearchValue}
+                  renderLabel={(item) => ({
+                    color: item.status === 1 ? 'green' : 'red',
+                    content: item.text
+                  })}
+                />
+              </Form.Field>
+            </Form.Group>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+              <div>
+                {filteredChannelIds.length > 0 ? 
+                  <small style={{ color: '#666' }}>
+                    {t('dashboard.charts.channelFilter.currently_excluding')} {filteredChannelIds.length} {t('dashboard.charts.channelFilter.channels') || '个渠道'}
+                  </small> : null
+                }
+              </div>
+              <div>
+                <Button type='button' size='small' onClick={clearChannelFilters}>
+                  {t('dashboard.charts.channelFilter.clear_filters')}
+                </Button>
+                <Button type='button' size='small' primary onClick={applyChannelFilters}>
+                  {t('dashboard.charts.channelFilter.apply_filters')}
+                </Button>
+              </div>
+            </div>
+          </Form>
+        </Card.Content>
+      </Card>
+
       {/* 三个并排的折线图 */}
       <Grid columns={3} stackable className='charts-grid'>
         <Grid.Column>
@@ -971,7 +1234,6 @@ const Dashboard = () => {
         </Card.Content>
       </Card>
 
-
       {/* Token Usage By Name Form */}
       <Grid.Column>
         <Card fluid className='chart-card'>
@@ -1103,7 +1365,7 @@ const Dashboard = () => {
                         ];
                       }}
                     />
-                    <Legend 
+                    <Legend
                       formatter={(value) => {
                         return value === 'unknown' ? t('dashboard.tokenStats.unknownUser') : value;
                       }}
@@ -1117,7 +1379,7 @@ const Dashboard = () => {
                         lineHeight: '20px'
                       }}
                     />
-                    {tokenUsageByNameData.length > 0 && 
+                    {tokenUsageByNameData.length > 0 &&
                       Object.keys(tokenUsageByNameData[0])
                         .filter(key => key !== 'token_name' && !key.endsWith('_count'))
                         .map((username, index) => (
@@ -1134,10 +1396,10 @@ const Dashboard = () => {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div style={{ 
-                  height: '200px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <div style={{
+                  height: '200px',
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'center',
                   color: '#999',
                   fontSize: '14px',
@@ -1149,6 +1411,74 @@ const Dashboard = () => {
                   {t('dashboard.tokenUsageByName.noDataHint')}
                 </div>
               )}
+            </div>
+          </Card.Content>
+        </Card>
+      </Grid.Column>
+
+      {/* Token使用明细统计表 */}
+      <Grid.Column width={16}>
+        <Card fluid className='chart-card'>
+          <Card.Content>
+            <Card.Header style={{ fontSize: '14px', textAlign: 'center' }}>
+              {t('dashboard.tokenUsageByName.tableTitle') || 'Token使用明细统计表'}
+            </Card.Header>
+
+            <div style={{ overflowX: 'auto', marginTop: '20px' }}>
+              <table className="ui striped table">
+                <thead>
+                  <tr>
+                    <th>{t('dashboard.tokenStats.username')}</th>
+                    <th>{t('dashboard.tokenStats.tokenName')}</th>
+                    <th>{t('dashboard.tokenStats.inputTokens')}</th>
+                    <th>{t('dashboard.tokenStats.outputTokens')}</th>
+                    <th>{t('dashboard.tokenStats.totalTokens')}</th>
+                    <th>{t('dashboard.tokenStats.requestCount')}</th>
+                    <th>{t('dashboard.tokenStats.lastUsed')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tokenDetailData.length > 0 ? (
+                    tokenDetailData.map((item, index) => (
+                      <tr key={index}>
+                        <td>{item.username}</td>
+                        <td>{item.token_name}</td>
+                        <td>{(item.prompt_tokens || 0).toLocaleString()}</td>
+                        <td>{(item.completion_tokens || 0).toLocaleString()}</td>
+                        <td>{(item.total_tokens || 0).toLocaleString()}</td>
+                        <td>{(item.request_count || 0).toLocaleString()}</td>
+                        <td>{item.last_used_time ? new Date(item.last_used_time * 1000).toLocaleString('zh-CN') : ''}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="7" style={{ textAlign: 'center' }}>
+                        {t('dashboard.tokenStats.noData') || '暂无数据'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+                {tokenDetailData.length > 0 && (
+                  <tfoot>
+                    <tr>
+                      <th colSpan="2" style={{ textAlign: 'right' }}>{t('dashboard.tokenStats.total') || '总计'}:</th>
+                      <th>
+                        {tokenDetailData.reduce((sum, item) => sum + (item.prompt_tokens || 0), 0).toLocaleString()}
+                      </th>
+                      <th>
+                        {tokenDetailData.reduce((sum, item) => sum + (item.completion_tokens || 0), 0).toLocaleString()}
+                      </th>
+                      <th>
+                        {tokenDetailData.reduce((sum, item) => sum + (item.total_tokens || 0), 0).toLocaleString()}
+                      </th>
+                      <th>
+                        {tokenDetailData.reduce((sum, item) => sum + (item.request_count || 0), 0).toLocaleString()}
+                      </th>
+                      <th></th>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
             </div>
           </Card.Content>
         </Card>
@@ -1169,7 +1499,7 @@ const Dashboard = () => {
                     search
                     selection
                     options={filteredUsers}
-                    value={formValues.username} 
+                    value={formValues.username}
                     onChange={handleUserSelect}
                     onSearchChange={handleUserSearch}
                     searchQuery={userSearchValue}
@@ -1224,16 +1554,16 @@ const Dashboard = () => {
         <Card fluid className='chart-card'>
           <Card.Content>
             <Card.Header style={{ fontSize: '14px', textAlign: 'center' }}>{t('dashboard.tokenModelUsage.chartTitle')}</Card.Header>
-            <div style={{ 
-              display: 'flex', 
+            <div style={{
+              display: 'flex',
               justifyContent: 'flex-end',
               marginTop: '10px',
-              marginBottom: '10px' 
+              marginBottom: '10px'
             }}>
               <select
                 value={timeInterval}
                 onChange={(e) => setTimeInterval(e.target.value)}
-                style={{ 
+                style={{
                   border: '1px solid #e0e1e2',
                   borderRadius: '4px',
                   padding: '6px 12px',
@@ -1273,9 +1603,9 @@ const Dashboard = () => {
                   >
                     <CartesianGrid strokeDasharray='3 3' vertical={false} opacity={0.1} />
                     <XAxis dataKey='interval' {...xAxisIntervalConfig} />
-                    <YAxis 
-                      axisLine={false} 
-                      tickLine={false} 
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
                       tick={{ fontSize: 14, fill: '#A3AED0' }}
                       width={60}
                     />
@@ -1312,7 +1642,7 @@ const Dashboard = () => {
                       labelFormatter={(label) => {
                         const comDate = label + ':00:00';
                         const date = new Date(comDate);
-                        
+
                         // 根据时间间隔显示不同格式的日期
                         if (timeInterval === 'hour') {
                           // 显示具体到小时的时间
@@ -1326,7 +1656,7 @@ const Dashboard = () => {
                         zIndex: 1000
                       }}
                     />
-                    <Legend 
+                    <Legend
                       formatter={(value) => {
                         return value === 'unknown' ? t('dashboard.tokenStats.unknownUser') : value;
                       }}
@@ -1353,10 +1683,10 @@ const Dashboard = () => {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div style={{ 
-                  height: '200px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <div style={{
+                  height: '200px',
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'center',
                   color: '#999',
                   fontSize: '14px',
@@ -1381,7 +1711,7 @@ const Dashboard = () => {
             <Card.Header style={{ fontSize: '14px', textAlign: 'center' }}>
               {t('dashboard.tokenModelUsage.tableTitle')}
             </Card.Header>
-            
+
             {isLoading ? (
               <div style={{ textAlign: 'center', padding: '40px 0' }}>
                 <div className="ui active centered inline loader"></div>
@@ -1449,7 +1779,7 @@ const Dashboard = () => {
         </Card>
       </Grid.Column>
 
-      
+
     </div>
   );
 };

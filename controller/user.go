@@ -14,6 +14,7 @@ import (
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	"github.com/songquanpeng/one-api/common/i18n"
+	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/random"
 	"github.com/songquanpeng/one-api/model"
 )
@@ -261,11 +262,13 @@ func GetUser(c *gin.Context) {
 
 func GetUserDashboard(c *gin.Context) {
 	id := c.GetInt(ctxkey.Id)
+	excludeModels := c.Query("excludeModels")
+	logger.SysLogf("excludeModels: %s", excludeModels)
 	now := time.Now()
 	startOfDay := now.Truncate(24*time.Hour).AddDate(0, 0, -6).Unix()
 	endOfDay := now.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second).Unix()
 
-	dashboards, err := model.SearchLogsByDayAndModel(id, int(startOfDay), int(endOfDay))
+	dashboards, err := model.SearchLogsByDayAndModel(id, int(startOfDay), int(endOfDay), excludeModels)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

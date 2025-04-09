@@ -424,6 +424,15 @@
       "tokens": {
         "title": "Token 消费趋势",
         "tooltip": "Token 数量"
+      },
+      "channelFilter": {
+        "title": "渠道筛选",
+        "channels_to_exclude": "需要排除的渠道",
+        "select_channels": "选择要排除的渠道",
+        "clear_filters": "重置",
+        "apply_filters": "应用",
+        "currently_excluding": "当前已排除",
+        "channels": "个渠道"
       }
     },
     "statistics": {
@@ -481,6 +490,7 @@
     "tokenUsageByName": {
       "formTitle": "Token使用统计查询",
       "chartTitle": "Token使用统计图",
+      "tableTitle": "Token使用统计表",
       "noDataHint": "暂无数据",
       "startDate": "开始日期",
       "endDate": "结束日期",

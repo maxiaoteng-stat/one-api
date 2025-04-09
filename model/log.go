@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -155,7 +156,7 @@ func SearchUserLogs(userId int, keyword string) (logs []*Log, err error) {
 	return logs, err
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int) (quota int64) {
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, excludeModels string) (quota int64) {
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
@@ -178,6 +179,9 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	if channel != 0 {
 		tx = tx.Where("channel_id = ?", channel)
+	}
+	if excludeModels != "" {
+		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
 	}
 	tx.Where("type = ?", LogTypeConsume).Scan(&quota)
 	return quota
@@ -222,7 +226,7 @@ type LogStatistic struct {
 	CompletionTokens int    `gorm:"column:completion_tokens"`
 }
 
-func SearchLogsByDayAndModel(userId, start, end int) (LogStatistics []*LogStatistic, err error) {
+func SearchLogsByDayAndModel(userId, start, end int, excludeModels string) (LogStatistics []*LogStatistic, err error) {
 	groupSelect := "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as day"
 
 	if common.UsingPostgreSQL {
@@ -233,25 +237,43 @@ func SearchLogsByDayAndModel(userId, start, end int) (LogStatistics []*LogStatis
 		groupSelect = "strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) as day"
 	}
 
-	err = LOG_DB.Raw(`
-		SELECT `+groupSelect+`,
-		model_name, count(1) as request_count,
-		sum(quota) as quota,
-		sum(prompt_tokens) as prompt_tokens,
-		sum(completion_tokens) as completion_tokens
-		FROM logs
-		WHERE type=2
-		AND user_id= ?
-		AND created_at BETWEEN ? AND ?
-		GROUP BY day, model_name
-		ORDER BY day, model_name
-	`, userId, start, end).Scan(&LogStatistics).Error
+	var tx *gorm.DB
+	if excludeModels == "" {
+		tx = LOG_DB.Raw(`
+			SELECT `+groupSelect+`,
+			model_name, count(1) as request_count,
+			sum(quota) as quota,
+			sum(prompt_tokens) as prompt_tokens,
+			sum(completion_tokens) as completion_tokens
+			FROM logs
+			WHERE type=2
+			AND user_id= ?
+			AND created_at BETWEEN ? AND ?
+			GROUP BY day, model_name
+			ORDER BY day, model_name`, userId, start, end)
+	} else {
+		tx = LOG_DB.Raw(`
+			SELECT `+groupSelect+`,
+			model_name, count(1) as request_count,
+			sum(quota) as quota,
+			sum(prompt_tokens) as prompt_tokens,
+			sum(completion_tokens) as completion_tokens
+			FROM logs
+			WHERE type=2
+			AND user_id= ?
+			AND created_at BETWEEN ? AND ?
+			AND model_name NOT IN (?)
+			GROUP BY day, model_name
+			ORDER BY day, model_name`, userId, start, end, strings.Split(excludeModels, ","))
+	}
+
+	err = tx.Scan(&LogStatistics).Error
 
 	return LogStatistics, err
 }
 
 // GetUserTokenModelUsage 统计单个用户token下各个模型在不同时间的使用量
-func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64) ([]struct {
+func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string) ([]struct {
 	ModelName    string `json:"model_name"`
 	CreatedAt    string `json:"created_at"`
 	Usage        int    `json:"usage"`
@@ -282,6 +304,9 @@ func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, 
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
 	}
+	if excludeModels != "" {
+		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	}
 
 	// 分组并执行查询
 	err := tx.Group("model_name, DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:%i:%s')").
@@ -302,7 +327,7 @@ type TokenUsageStat struct {
 }
 
 // GetAllUserTokenStats 获取所有用户的Token使用统计
-func GetAllUserTokenStats(startTimestamp, endTimestamp int64) ([]TokenUsageStat, error) {
+func GetAllUserTokenStats(startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
@@ -321,6 +346,10 @@ func GetAllUserTokenStats(startTimestamp, endTimestamp int64) ([]TokenUsageStat,
 	// 构建查询条件
 	tx = tx.Where("type = ? AND created_at BETWEEN ? AND ?", LogTypeConsume, startTimestamp, endTimestamp)
 
+	if excludeModels != "" {
+		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	}
+
 	// 分组并排序
 	tx = tx.Group("username, token_name").Order("total_tokens DESC")
 
@@ -335,7 +364,7 @@ func GetAllUserTokenStats(startTimestamp, endTimestamp int64) ([]TokenUsageStat,
 }
 
 // GetUserTokenStats 获取特定用户的Token使用统计
-func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestamp int64) ([]TokenUsageStat, error) {
+func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
@@ -355,6 +384,10 @@ func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestam
 	tx = tx.Where("user_id = ? AND type = ? AND token_name = ? AND created_at BETWEEN ? AND ?",
 		userId, LogTypeConsume, tokenName, startTimestamp, endTimestamp)
 
+	if excludeModels != "" {
+		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	}
+
 	// 分组并排序
 	tx = tx.Group("username, token_name").Order("total_tokens DESC")
 
@@ -368,21 +401,25 @@ func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestam
 	return stats, nil
 }
 
-// TokenUsageByNameStat 统计结构
-type TokenUsageByNameStat struct {
-	Username     string `json:"username"`
-	TokenName    string `json:"token_name"`
-	TotalTokens  int64  `json:"total_tokens"`
-	RequestCount int64  `json:"request_count"`
-}
-
 // GetTokenUsageByName 获取指定时间范围内的Token使用统计
-func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string) ([]TokenUsageByNameStat, error) {
-	var stats []TokenUsageByNameStat
-	query := DB.Table("logs").
-		Select("username, token_name, SUM(prompt_tokens + completion_tokens) as total_tokens, COUNT(1) as request_count").
-		Where("created_at BETWEEN ? AND ?", startTime, endTime).
-		Group("username, token_name")
+func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string, excludeModels string) ([]TokenUsageStat, error) {
+	ifnull := "ifnull"
+	if common.UsingPostgreSQL {
+		ifnull = "COALESCE"
+	}
+
+	var stats []TokenUsageStat
+	query := LOG_DB.Table("logs").Select(fmt.Sprintf(
+		"username, token_name, "+
+			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
+			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
+			"%s(sum(completion_tokens),0) as completion_tokens, "+
+			"COUNT(id) as request_count, "+
+			"MAX(created_at) as last_used_time",
+		ifnull, ifnull, ifnull)).
+		Where("type = ? AND created_at BETWEEN ? AND ?", LogTypeConsume, startTime, endTime).
+		Group("username, token_name").
+		Order("total_tokens DESC")
 
 	if userId > 0 {
 		query = query.Where("user_id = ?", userId)
@@ -390,7 +427,10 @@ func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string)
 	if tokenName != "" {
 		query = query.Where("token_name = ?", tokenName)
 	}
+	if excludeModels != "" {
+		query = query.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	}
 
-	err := query.Find(&stats).Error
+	err := query.Scan(&stats).Error
 	return stats, err
 }
