@@ -427,7 +427,7 @@
       },
       "channelFilter": {
         "title": "渠道筛选",
-        "channels_to_exclude": "需要排除的渠道",
+        "channels_to_exclude": "请选择需要排除的渠道",
         "select_channels": "选择要排除的渠道",
         "clear_filters": "重置",
         "apply_filters": "应用",

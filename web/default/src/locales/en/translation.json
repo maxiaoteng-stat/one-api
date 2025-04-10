@@ -427,7 +427,7 @@
       },
       "channelFilter": {
         "title": "Channel Filter",
-        "channels_to_exclude": "Channels to Exclude",
+        "channels_to_exclude": "Please select channels to exclude",
         "select_channels": "Select Channels to Exclude",
         "clear_filters": "Reset",
         "apply_filters": "Apply",
@@ -461,7 +461,7 @@
     },
     "tokenModelUsage": {
       "formtitle": "Query User Usage",
-      "title": "User Usage Statistics",
+      "tableTitle": "User Usage Statistics",
       "chartTitle": "User Usage Chart",
       "noDataHint": "Please select a user and time range, then click query"
     },
