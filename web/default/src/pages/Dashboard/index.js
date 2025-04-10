@@ -88,7 +88,7 @@ const Dashboard = () => {
     startTimestamp: '',
     endTimestamp: '',
   });
-  const [timeInterval, setTimeInterval] = useState('day'); // 默认为天
+  const [timeInterval, setTimeInterval] = useState('day'); // 默认间隔为天
   const [usageStats, setUsageStats] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [tokenUsageByNameData, setTokenUsageByNameData] = useState([]);
@@ -106,15 +106,11 @@ const Dashboard = () => {
   const [channelSearchValue, setChannelSearchValue] = useState(''); // 渠道搜索值
   const [filteredChannels, setFilteredChannels] = useState([]); // 搜索后过滤的渠道列表
   const [modelMappingValues, setModelMappingValues] = useState([]); // 要排除的模型列表
-  const [isChannelsInit,setIsChannelsInit] = useState(false);
+  const [isChannelsInit,setIsChannelsInit] = useState(false);  // 是否初始化渠道
 
   useEffect(() => {
     fetchChannels();
     fetchUsers();
-    
-    // fetchDashboardData();
-    // fetchAllUserUsageStats();
-    // fetchAllTokensFromLogs();
   }, []);
 
   useEffect(() => {
@@ -124,6 +120,15 @@ const Dashboard = () => {
       fetchDashboardData();
       fetchAllUserUsageStats();
       fetchAllTokensFromLogs();
+      const { startDate, endDate} = tokenUsageByNameForm;
+      // 如果startDate和endDate存在，则调用handleTokenUsageByNameSubmit
+      if (startDate && endDate) {
+        handleTokenUsageByNameSubmit();
+      }
+      // 如果formValues存在，则调用handleSubmit
+      if (formValues.username && formValues.tokenName && formValues.startTimestamp && formValues.endTimestamp) {
+        handleSubmit();
+      }
     }
   }, [modelMappingValues]);
 
@@ -191,7 +196,10 @@ const Dashboard = () => {
   };
 
   const handleSubmit = (e) => {
-    e.preventDefault();
+    // 如果e存在，则阻止默认行为
+    if (e) {
+      e.preventDefault();
+    }
 
     // 验证所有必填字段
     if (!formValues.username || !formValues.tokenName || !formValues.startTimestamp || !formValues.endTimestamp) {
@@ -785,7 +793,10 @@ const Dashboard = () => {
 
   // 处理表单提交
   const handleTokenUsageByNameSubmit = (e) => {
-    e.preventDefault();
+    // 如果e存在，则阻止默认行为
+    if (e) {
+      e.preventDefault();
+    }
     const { startDate, endDate, username, tokenName } = tokenUsageByNameForm;
 
     if (!startDate || !endDate) {
@@ -1234,7 +1245,7 @@ const Dashboard = () => {
         </Card.Content>
       </Card>
 
-      {/* Token Usage By Name Form */}
+      {/* Token Usage By Name Form 开始时间结束时间必填*/}
       <Grid.Column>
         <Card fluid className='chart-card'>
           <Card.Content>
@@ -1484,7 +1495,7 @@ const Dashboard = () => {
         </Card>
       </Grid.Column>
 
-      {/* Token Model Usage Chart Form */}
+      {/* Token Model Usage Chart Form 全是必填项*/}
       <Grid.Column>
         <Card fluid className='chart-card'>
           <Card.Content>
