@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common/config"
@@ -330,5 +331,95 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    stats,
+	})
+}
+
+// GetDailyUsageStats 获取特定token在一段时间内按天统计的使用次数
+func GetDailyUsageStats(c *gin.Context) {
+	var requestData struct {
+		Key       string `json:"key"`
+		StartTime int64  `json:"start_time"`
+		EndTime   int64  `json:"end_time"`
+	}
+
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 400,
+			"msg":  "无效的请求参数",
+			"data": nil,
+		})
+		return
+	}
+
+	// 验证并提取token
+	if requestData.Key == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 400,
+			"msg":  "缺少token参数",
+			"data": nil,
+		})
+		return
+	}
+
+	// 去除sk-前缀
+	key := strings.TrimPrefix(requestData.Key, "sk-")
+
+	// 验证时间范围
+	if requestData.StartTime == 0 || requestData.EndTime == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 400,
+			"msg":  "无效的时间范围",
+			"data": nil,
+		})
+		return
+	}
+
+	usageData, err := model.GetDailyUsageStats(key, requestData.StartTime, requestData.EndTime)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 500,
+			"msg":  "获取使用统计失败: " + err.Error(),
+			"data": nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "成功",
+		"data": usageData,
+	})
+}
+
+// GetTotalTokenUsageStats 获取token的总使用次数
+func GetTotalUsageStats(c *gin.Context) {
+	key := c.Query("key")
+
+	if key == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 400,
+			"msg":  "缺少token参数",
+			"data": nil,
+		})
+		return
+	}
+
+	// 去除sk-前缀
+	accessToken := strings.TrimPrefix(key, "sk-")
+
+	totalUsage, err := model.GetTotalUsage(accessToken)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 500,
+			"msg":  "获取使用统计失败: " + err.Error(),
+			"data": nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "成功",
+		"data": totalUsage,
 	})
 }

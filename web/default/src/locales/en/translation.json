@@ -236,6 +236,19 @@
       "default": "Default Order",
       "by_remain": "Sort by Remaining Quota",
       "by_used": "Sort by Used Quota"
+    },
+    "rate_limit": {
+      "button": "Rate Limit",
+      "title": "Token Rate Limit Settings",
+      "inherit_global": "Inherit Global Settings",
+      "max_qps": "Maximum QPS",
+      "max_qps_placeholder": "Set to 0 to disable QPS limiting",
+      "max_qps_hint": "Maximum number of requests per second for this token",
+      "daily_quota": "Daily Quota",
+      "daily_quota_placeholder": "Set to 0 to disable daily quota",
+      "daily_quota_hint": "Maximum number of requests allowed per day for this token. Exceeding this will trigger alerts",
+      "enabled": "Enable Rate Limit",
+      "enabled_hint": "Set whether to enable rate limiting for this token"
     }
   },
   "common": {
@@ -506,7 +519,8 @@
       "personal": "Personal Settings",
       "operation": "Operation Settings",
       "system": "System Settings",
-      "other": "Other Settings"
+      "other": "Other Settings",
+      "rate_limit": "Rate Limiting"
     },
     "personal": {
       "general": {
@@ -791,6 +805,31 @@
       "copyright": {
         "notice": "Removing One API's copyright notice requires authorization. Project maintenance requires significant effort, if this project is meaningful to you, please actively support it."
       }
+    },
+    "rate_limit": {
+      "title": "Global Rate Limiting Settings",
+      "max_qps": "Maximum QPS",
+      "max_qps_placeholder": "Set to 0 to disable QPS limiting",
+      "max_qps_hint": "Maximum number of requests per second. Requests exceeding this limit will be rejected or queued",
+      "daily_quota": "Daily Quota",
+      "daily_quota_placeholder": "Set to 0 to disable daily quota",
+      "daily_quota_hint": "Maximum number of requests allowed per day. Exceeding this will trigger alerts",
+      "queue_capacity": "Queue Capacity",
+      "queue_capacity_placeholder": "Set to 0 to disable queuing and reject directly",
+      "queue_capacity_hint": "Maximum number of requests allowed in the queue",
+      "queue_timeout": "Queue Timeout (seconds)",
+      "queue_timeout_placeholder": "Requests will be rejected after timeout",
+      "queue_timeout_hint": "Maximum waiting time for queued requests",
+      "warning_threshold": "Warning Threshold (%)",
+      "warning_threshold_placeholder": "e.g., 80",
+      "warning_threshold_hint": "Alerts will be triggered when quota usage reaches this percentage",
+      "dingtalk_webhook": "DingTalk Webhook",
+      "dingtalk_webhook_placeholder": "e.g., https://oapi.dingtalk.com/robot/send?access_token=xxx",
+      "dingtalk_webhook_hint": "DingTalk robot webhook URL for receiving alert notifications",
+      "save": "Save",
+      "cancel": "Cancel",
+      "enabled": "Enable Rate Limit",
+      "enabled_hint": "Set whether to enable global rate limiting"
     }
   },
   "footer": {

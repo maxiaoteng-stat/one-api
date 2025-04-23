@@ -236,6 +236,35 @@
       "default": "默认排序",
       "by_remain": "按剩余额度排序",
       "by_used": "按已用额度排序"
+    },
+    "rate_limit": {
+      "button": "限流",
+      "title": "设置令牌限流",
+      "inherit_global": "继承全局设置",
+      "max_qps": "最大QPS",
+      "max_qps_placeholder": "设置为0表示不限制QPS",
+      "max_qps_hint": "该令牌每秒最大请求数",
+      "daily_quota": "单日配额",
+      "daily_quota_placeholder": "设置为0表示不限制单日配额",
+      "daily_quota_hint": "该令牌每日最大请求量，超过触发预警",
+      "enabled": "启用限流",
+      "enabled_hint": "设置是否启用此Token的限流功能",
+      "queue_capacity": "队列容量",
+      "queue_capacity_placeholder": "设置为0表示不使用队列，直接拒绝",
+      "queue_capacity_hint": "允许排队的最大请求数",
+      "queue_timeout": "队列超时时间(秒)",
+      "queue_timeout_placeholder": "排队超时后将被拒绝",
+      "queue_timeout_hint": "排队请求的最大等待时间",
+      "warning_threshold": "预警阈值(%)",
+      "warning_threshold_placeholder": "例如: 80",
+      "warning_threshold_hint": "当配额使用达到此比例时触发预警",
+      "dingtalk_webhook": "钉钉Webhook",
+      "dingtalk_webhook_placeholder": "例如: https://oapi.dingtalk.com/robot/send?access_token=xxx",
+      "dingtalk_webhook_hint": "接收预警通知的钉钉机器人Webhook地址",
+      "save": "保存",
+      "cancel": "取消",
+      "update_success": "更新成功",
+      "update_failed": "更新失败"
     }
   },
   "common": {
@@ -505,7 +534,8 @@
       "personal": "个人设置",
       "operation": "运营设置",
       "system": "系统设置",
-      "other": "其他设置"
+      "other": "其他设置",
+      "rate_limit": "限流设置"
     },
     "personal": {
       "general": {
@@ -786,6 +816,33 @@
       "copyright": {
         "notice": "移除 One API 的版权标识必须首先获得授权，项目维护需要花费大量精力，如果本项目对你有意义，请主动支持本项目。"
       }
+    },
+    "rate_limit": {
+      "title": "全局限流设置",
+      "max_qps": "最大QPS",
+      "max_qps_placeholder": "设置为0表示不限制QPS",
+      "max_qps_hint": "系统每秒最大处理请求数，超过则拒绝或排队",
+      "daily_quota": "单日配额",
+      "daily_quota_placeholder": "设置为0表示不限制单日配额",
+      "daily_quota_hint": "系统每日最大请求量，超过触发预警",
+      "queue_capacity": "队列容量",
+      "queue_capacity_placeholder": "设置为0表示不使用队列，直接拒绝",
+      "queue_capacity_hint": "允许排队的最大请求数",
+      "queue_timeout": "队列超时时间(秒)",
+      "queue_timeout_placeholder": "排队超时后将被拒绝",
+      "queue_timeout_hint": "排队请求的最大等待时间",
+      "warning_threshold": "预警阈值(%)",
+      "warning_threshold_placeholder": "例如: 80",
+      "warning_threshold_hint": "当配额使用达到此比例时触发预警",
+      "dingtalk_webhook": "钉钉Webhook",
+      "dingtalk_webhook_placeholder": "例如: https://oapi.dingtalk.com/robot/send?access_token=xxx",
+      "dingtalk_webhook_hint": "接收预警通知的钉钉机器人Webhook地址",
+      "save": "保存",
+      "cancel": "取消",
+      "update_success": "更新成功",
+      "update_failed": "更新失败",
+      "enabled": "启用限流",
+      "enabled_hint": "设置是否启用全局限流功能"
     }
   },
   "about": {

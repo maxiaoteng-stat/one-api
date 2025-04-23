@@ -313,3 +313,19 @@ func PostConsumeTokenQuota(tokenId int, quota int64) (err error) {
 	}
 	return nil
 }
+
+// GetAllTokensMap 获取所有token的映射表
+func GetAllTokensMap() (map[int]*Token, error) {
+	var tokens []*Token
+	err := DB.Find(&tokens).Error
+	if err != nil {
+		return nil, err
+	}
+
+	tokenMap := make(map[int]*Token)
+	for _, token := range tokens {
+		tokenMap[token.Id] = token
+	}
+
+	return tokenMap, nil
+}

@@ -116,6 +116,17 @@ func main() {
 	if port == "" {
 		port = strconv.Itoa(*common.Port)
 	}
+
+	// 启动钉钉预警检查任务 -- 暂时不用管
+	// monitor.StartAlertChecker(300) // 5分钟检查一次
+
+	// 在redis初始化后初始化滑动窗口限流器
+	common.InitSlidingWindowLimiter()
+	// 在Redis初始化后加载当日使用量
+	model.InitDailyUsageCache()
+	// 加载限流配置到Redis
+	model.InitRateLimitCache()
+
 	logger.SysLogf("server started on http://localhost:%s", port)
 	err = server.Run(":" + port)
 	if err != nil {

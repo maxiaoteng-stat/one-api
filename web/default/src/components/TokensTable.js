@@ -21,6 +21,7 @@ import {
 
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderQuota } from '../helpers/render';
+import TokenRateLimitModal from './TokenRateLimitModal';
 
 function renderTimestamp(timestamp) {
   return <>{timestamp2string(timestamp)}</>;
@@ -87,6 +88,8 @@ const TokensTable = () => {
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [targetTokenIdx, setTargetTokenIdx] = useState(0);
   const [orderBy, setOrderBy] = useState('');
+  const [rateLimitModalOpen, setRateLimitModalOpen] = useState(false);
+  const [currentToken, setCurrentToken] = useState(null);
 
   const loadTokens = async (startIdx) => {
     const res = await API.get(`/api/token/?p=${startIdx}&order=${orderBy}`);
@@ -301,6 +304,11 @@ const TokensTable = () => {
     setActivePage(1);
   };
 
+  const openRateLimitModal = (token) => {
+    setCurrentToken(token);
+    setRateLimitModalOpen(true);
+  };
+
   return (
     <>
       <Form onSubmit={searchTokens}>
@@ -486,6 +494,12 @@ const TokensTable = () => {
                       >
                         {t('token.buttons.edit')}
                       </Button>
+                      <Button
+                        size={'tiny'}
+                        onClick={() => openRateLimitModal(token)}
+                      >
+                        {t('token.rate_limit.button')}
+                      </Button>
                     </div>
                   </Table.Cell>
                 </Table.Row>
@@ -537,6 +551,16 @@ const TokensTable = () => {
           </Table.Row>
         </Table.Footer>
       </Table>
+
+      <TokenRateLimitModal
+        open={rateLimitModalOpen}
+        tokenId={currentToken?.id}
+        tokenName={currentToken?.name}
+        onClose={() => setRateLimitModalOpen(false)}
+        onSuccess={() => {
+          loadTokens();
+        }}
+      />
     </>
   );
 };

@@ -2,14 +2,21 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
+	"github.com/songquanpeng/one-api/common/ctxkey"
+	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/songquanpeng/one-api/model"
+	"gorm.io/gorm"
 )
 
 var timeFormat = "2006-01-02T15:04:05.000Z"
@@ -108,4 +115,297 @@ func DownloadRateLimit() func(c *gin.Context) {
 
 func UploadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(config.UploadRateLimitNum, config.UploadRateLimitDuration, "UP")
+}
+
+// TokenRateLimiter Token级别限流中间件
+func TokenRateLimiter() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		// 跳过对非API请求的限流
+		if !strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			c.Next()
+			return
+		}
+
+		// 获取Token ID
+		tokenId := c.GetInt(ctxkey.TokenId)
+		if tokenId == 0 {
+			c.Next() // 没有Token，不做限流
+			return
+		}
+
+		// 获取Token限流配置
+		tokenLimit, err := model.GetTokenRateLimit(tokenId)
+		if err != nil {
+			// 如果是记录不存在的错误，则跳过限流检查
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Debug(ctx, fmt.Sprintf("Token %d 没有限流配置，跳过限流检查", tokenId))
+				c.Next()
+				return
+			}
+
+			// 其他错误
+			logger.Error(ctx, fmt.Sprintf("获取Token限流配置失败: %s", err.Error()))
+			c.Next() // 出错时不做限流，继续处理请求
+			return
+		}
+
+		// 检查是否启用了限流
+		if !tokenLimit.Enabled {
+			c.Next()
+			return
+		}
+
+		// 获取配置参数
+		maxQPS := tokenLimit.MaxQPS
+		dailyQuota := tokenLimit.DailyQuota
+
+		// 如果都没有设置限制，直接通过
+		if maxQPS <= 0 && dailyQuota <= 0 {
+			c.Next()
+			return
+		}
+
+		// 如果设置了日配额(dailyQuota > 0)，检查今日使用量
+		if dailyQuota > 0 {
+			// 从Redis获取今日使用的token量
+			dailyUsage, err := model.GetTokenDailyUsage(c.GetString(ctxkey.TokenName))
+			if err != nil {
+				logger.Error(ctx, fmt.Sprintf("获取Token日配额使用情况失败: %s", err.Error()))
+				// 出错时不做限流，继续处理请求
+			} else if dailyUsage >= int64(dailyQuota) {
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"error": gin.H{
+						"message": "该Token日配额已用完，请明天再试或增加配额",
+						"type":    "rate_limit_error",
+						"code":    "daily_quota_exceeded",
+					},
+				})
+				c.Abort()
+				return
+			}
+		}
+
+		// 如果设置了QPS限制，执行QPS限流检查
+		if maxQPS > 0 {
+			qpsKey := fmt.Sprintf("token:%d", tokenId)
+			allowed := false
+
+			// 使用滑动窗口检查当前QPS
+			if common.RedisEnabled {
+				windowSize := int64(1000) // 1秒窗口，单位毫秒
+				allowed, _, err = common.RedisSlidingWindowLimiter.CheckAndIncrease(
+					qpsKey,
+					windowSize,
+					maxQPS,
+					60, // 过期时间设为60秒
+				)
+
+				if err != nil {
+					logger.Error(ctx, fmt.Sprintf("检查Token QPS限流失败: %s", err.Error()))
+					c.Next() // 出错时不做限流，继续处理请求
+					return
+				}
+			} else {
+				// 内存实现
+				allowed, _ = common.InMemorySlidingWindowLimiter.CheckAndIncrease(
+					qpsKey,
+					1000, // 1秒窗口，单位毫秒
+					maxQPS,
+				)
+			}
+
+			// 如果QPS超限，拒绝请求
+			if !allowed {
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"error": gin.H{
+						"message": "当前Token请求过多，请降低请求频率",
+						"type":    "rate_limit_error",
+						"code":    "token_limit_exceeded",
+					},
+				})
+				c.Abort()
+				return
+			}
+		}
+
+		c.Next()
+	}
+}
+
+// GlobalRateLimiter 全局限流中间件 - 仅当Token限流未执行时生效
+func GlobalRateLimiter() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		// 跳过对非API请求的限流
+		if !strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			c.Next()
+			return
+		}
+
+		// 获取全局限流配置
+		globalLimit, err := model.GetGlobalRateLimit()
+		if err != nil {
+			logger.Error(ctx, fmt.Sprintf("failed to get global rate limit: %s", err.Error()))
+			c.Next() // 出错时不做限流，继续处理请求
+			return
+		}
+
+		// 检查是否启用了全局限流
+		if !globalLimit.Enabled {
+			c.Next()
+			return
+		}
+
+		// 如果设置了日配额(dailyQuota > 0)，检查今日全局使用量
+		if globalLimit.DailyQuota > 0 {
+			// 从Redis获取今日使用的全局配额
+			dailyUsage, err := model.GetGlobalDailyUsage()
+			if err != nil {
+				logger.Error(ctx, fmt.Sprintf("获取全局日配额使用情况失败: %s", err.Error()))
+				// 出错时不做限流，继续处理请求
+			} else if dailyUsage >= int64(globalLimit.DailyQuota) {
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"error": gin.H{
+						"message": "系统今日配额已用完，请明天再试",
+						"type":    "rate_limit_error",
+						"code":    "daily_quota_exceeded",
+					},
+				})
+				c.Abort()
+				return
+			}
+		}
+
+		// 如果设置了QPS限制，执行QPS限流检查
+		if globalLimit.MaxQPS > 0 {
+			qpsKey := "global"
+			allowed := false
+
+			// 使用滑动窗口检查当前QPS
+			if common.RedisEnabled {
+				windowSize := int64(1000) // 1秒窗口，单位毫秒
+				allowed, _, err = common.RedisSlidingWindowLimiter.CheckAndIncrease(
+					qpsKey,
+					windowSize,
+					globalLimit.MaxQPS,
+					60, // 过期时间设为60秒
+				)
+
+				if err != nil {
+					logger.Error(ctx, fmt.Sprintf("failed to check rate limit: %s", err.Error()))
+					c.Next() // 出错时不做限流，继续处理请求
+					return
+				}
+			} else {
+				// 内存实现
+				allowed, _ = common.InMemorySlidingWindowLimiter.CheckAndIncrease(
+					qpsKey,
+					1000, // 1秒窗口，单位毫秒
+					globalLimit.MaxQPS,
+				)
+			}
+
+			// 如果请求不被允许或当前QPS超过限制，处理队列或拒绝
+			if !allowed {
+				// 如果没有队列容量或者请求超过队列容量，直接拒绝
+				if globalLimit.QueueCapacity <= 0 {
+					c.JSON(http.StatusTooManyRequests, gin.H{
+						"error": gin.H{
+							"message": "系统当前请求过多，请稍后再试",
+							"type":    "rate_limit_error",
+							"code":    "too_many_requests",
+						},
+					})
+					c.Abort()
+					return
+				}
+
+				// 处理队列逻辑
+				err = handleRequestQueue(c, qpsKey, globalLimit)
+				if err != nil {
+					// 队列处理失败，继续处理请求
+					logger.Error(ctx, fmt.Sprintf("queue handling failed: %s", err.Error()))
+					c.Next()
+					return
+				}
+
+				// 如果处理结果为nil且没有调用Next()，表示请求已被处理或拒绝
+				return
+			}
+		}
+
+		c.Next()
+	}
+}
+
+// handleRequestQueue 处理请求队列逻辑，抽取为独立函数以提高可读性
+func handleRequestQueue(c *gin.Context, qpsKey string, globalLimit *model.GlobalRateLimit) error {
+	// 获取当前队列长度
+	queueLength, err := common.GetQueueLength(qpsKey)
+	if err != nil {
+		return fmt.Errorf("failed to get queue length: %s", err.Error())
+	}
+
+	// 如果队列已满，拒绝请求
+	if queueLength >= int64(globalLimit.QueueCapacity) {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error": gin.H{
+				"message": "系统当前排队请求过多，请稍后再试",
+				"type":    "rate_limit_error",
+				"code":    "queue_full",
+			},
+		})
+		c.Abort()
+		return nil
+	}
+
+	// 生成请求ID并加入队列
+	requestId := uuid.New().String()
+	err = common.EnqueueRequest(qpsKey, requestId, globalLimit.QueueTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to enqueue request: %s", err.Error())
+	}
+
+	// 等待轮到本请求处理
+	startTime := time.Now()
+	for {
+		// 检查是否超时
+		elapsed := time.Since(startTime).Seconds()
+		if elapsed > float64(globalLimit.QueueTimeout) {
+			c.JSON(http.StatusRequestTimeout, gin.H{
+				"error": gin.H{
+					"message": "请求等待超时，请稍后再试",
+					"type":    "rate_limit_error",
+					"code":    "queue_timeout",
+				},
+			})
+			c.Abort()
+			return nil
+		}
+
+		// 尝试从队列头取出请求
+		headRequestId, err := common.DequeueRequest(qpsKey)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond) // 短暂暂停后重试
+			continue
+		}
+
+		// 如果取出的请求ID是当前请求，则继续处理
+		if headRequestId == requestId {
+			c.Next()
+			return nil
+		}
+
+		// 不是当前请求，检查队列的请求是否已超时
+		isTimedOut, _ := common.IsRequestTimedOut(headRequestId)
+		if isTimedOut {
+			continue // 该请求已超时，继续检查下一个
+		}
+
+		// 将请求重新放回队列头部，等待下一次轮询
+		common.EnqueueRequest(qpsKey, headRequestId, globalLimit.QueueTimeout)
+		time.Sleep(100 * time.Millisecond)
+	}
 }

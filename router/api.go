@@ -119,11 +119,23 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/stats", middleware.AdminAuth(), controller.GetAllUserStatsHandler)
 		logRoute.GET("/user/stats", middleware.AdminAuth(), controller.GetUserTokenStatsHandler)
 		logRoute.GET("/token/usage-by-name", controller.GetTokenUsageByNameHandler)
+		logRoute.POST("/dailyUsageStats", controller.GetDailyUsageStats)
+		logRoute.GET("/totalUsage", controller.GetTotalUsageStats)
 
 		groupRoute := apiRouter.Group("/group")
 		groupRoute.Use(middleware.AdminAuth())
 		{
 			groupRoute.GET("/", controller.GetGroups)
+		}
+
+		// 限流设置相关路由
+		adminRoute := apiRouter.Group("/")
+		adminRoute.Use(middleware.AdminAuth())
+		{
+			adminRoute.GET("/rate-limit/global", controller.GetGlobalRateLimit)
+			adminRoute.PUT("/rate-limit/global", controller.UpdateGlobalRateLimit)
+			adminRoute.GET("/rate-limit/token/:id", controller.GetTokenRateLimit)
+			adminRoute.PUT("/rate-limit/token/:id", controller.UpdateTokenRateLimit)
 		}
 	}
 }

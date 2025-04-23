@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -76,6 +77,13 @@ func RecordTopupLog(ctx context.Context, userId int, content string, quota int) 
 		Quota:     quota,
 	}
 	recordLogHelper(ctx, log)
+	// 更新Redis中的日配额使用量
+	if common.RedisEnabled && log.TokenName != "" {
+		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
+		if err != nil {
+			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
+		}
+	}
 }
 
 func RecordConsumeLog(ctx context.Context, log *Log) {
@@ -86,12 +94,28 @@ func RecordConsumeLog(ctx context.Context, log *Log) {
 	log.CreatedAt = helper.GetTimestamp()
 	log.Type = LogTypeConsume
 	recordLogHelper(ctx, log)
+
+	// 更新Redis中的日配额使用量
+	if common.RedisEnabled && log.TokenName != "" {
+		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
+		if err != nil {
+			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
+		}
+	}
 }
 
 func RecordTestLog(ctx context.Context, log *Log) {
 	log.CreatedAt = helper.GetTimestamp()
 	log.Type = LogTypeTest
 	recordLogHelper(ctx, log)
+
+	// 更新Redis中的日配额使用量
+	if common.RedisEnabled && log.TokenName != "" {
+		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
+		if err != nil {
+			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
+		}
+	}
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int) (logs []*Log, err error) {
@@ -433,4 +457,82 @@ func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string,
 
 	err := query.Scan(&stats).Error
 	return stats, err
+}
+
+// GetDailyUsageStats 获取特定token在一段时间内按天统计的使用次数
+func GetDailyUsageStats(tokenKey string, startTimestamp int64, endTimestamp int64) (map[string]int, error) {
+	// 构建日期格式选择
+	groupSelect := "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as day"
+	if common.UsingPostgreSQL {
+		groupSelect = "TO_CHAR(date_trunc('day', to_timestamp(created_at)), 'YYYY-MM-DD') as day"
+	}
+	if common.UsingSQLite {
+		groupSelect = "strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) as day"
+	}
+
+	// 从tokens表中查询该key对应的token
+	var token Token
+	keyCol := "`key`"
+	if common.UsingPostgreSQL {
+		keyCol = `"key"`
+	}
+	err := DB.Where(keyCol+" = ?", tokenKey).First(&token).Error
+	if err != nil {
+		return nil, errors.New("无效的令牌")
+	}
+
+	// 查询日志统计
+	var results []struct {
+		Day   string `gorm:"column:day"`
+		Count int    `gorm:"column:count"`
+	}
+
+	tx := LOG_DB.Raw(`
+		SELECT `+groupSelect+`, COUNT(1) as count
+		FROM logs
+		WHERE type = ? 
+		AND token_name = ?
+		AND created_at BETWEEN ? AND ?
+		GROUP BY day
+		ORDER BY day ASC
+	`, LogTypeConsume, token.Name, startTimestamp, endTimestamp)
+
+	err = tx.Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换为map格式
+	usageMap := make(map[string]int)
+	for _, r := range results {
+		usageMap[r.Day] = r.Count
+	}
+
+	return usageMap, nil
+}
+
+// GetTotalUsage 获取指定token的总使用次数
+func GetTotalUsage(tokenKey string) (int, error) {
+	// 从tokens表中查询该key对应的token
+	var token Token
+	keyCol := "`key`"
+	if common.UsingPostgreSQL {
+		keyCol = `"key"`
+	}
+	err := DB.Where(keyCol+" = ?", tokenKey).First(&token).Error
+	if err != nil {
+		return 0, errors.New("无效的令牌")
+	}
+
+	// 查询该token的总使用次数
+	var count int64
+	err = LOG_DB.Model(&Log{}).
+		Where("token_name = ? AND type = ?", token.Name, LogTypeConsume).
+		Count(&count).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return int(count), nil
 }
