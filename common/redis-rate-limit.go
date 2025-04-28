@@ -79,16 +79,23 @@ func EnqueueRequest(key string, requestId string, timeout int) error {
 	ctx := context.Background()
 	redisKey := "request_queue:" + key
 
+	// 使用管道批量执行命令以提高效率
+	pipe := RDB.Pipeline()
+
 	// 将请求ID放入队列
-	err := RDB.RPush(ctx, redisKey, requestId).Err()
-	if err != nil {
-		return err
-	}
+	pipe.RPush(ctx, redisKey, requestId)
+
+	// 为队列设置过期时间（比单个请求的超时时间更长一些）
+	// 设置为请求超时时间的2-3倍，确保队列能够处理完所有请求
+	queueTimeout := timeout * 2
+	pipe.Expire(ctx, redisKey, time.Duration(queueTimeout)*time.Second)
 
 	// 设置请求超时
 	timeoutKey := "request_timeout:" + requestId
-	err = RDB.Set(ctx, timeoutKey, time.Now().Unix(), time.Duration(timeout)*time.Second).Err()
+	pipe.Set(ctx, timeoutKey, time.Now().Unix(), time.Duration(timeout)*time.Second)
 
+	// 执行所有命令
+	_, err := pipe.Exec(ctx)
 	return err
 }
 

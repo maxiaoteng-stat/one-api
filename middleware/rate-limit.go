@@ -127,6 +127,11 @@ func TokenRateLimiter() gin.HandlerFunc {
 			return
 		}
 
+		if !common.RedisEnabled {
+			c.Next()
+			return
+		}
+
 		// 获取Token ID
 		tokenId := c.GetInt(ctxkey.TokenId)
 		if tokenId == 0 {
@@ -244,6 +249,11 @@ func GlobalRateLimiter() gin.HandlerFunc {
 			return
 		}
 
+		if !common.RedisEnabled {
+			c.Next()
+			return
+		}
+
 		// 获取全局限流配置
 		globalLimit, err := model.GetGlobalRateLimit()
 		if err != nil {
@@ -311,6 +321,7 @@ func GlobalRateLimiter() gin.HandlerFunc {
 			if !allowed {
 				// 如果没有队列容量或者请求超过队列容量，直接拒绝
 				if globalLimit.QueueCapacity <= 0 {
+					logger.Warn(ctx, "超过QPS限制，没有设置队列容量,拒绝请求！")
 					c.JSON(http.StatusTooManyRequests, gin.H{
 						"error": gin.H{
 							"message": "系统当前请求过多，请稍后再试",
@@ -340,16 +351,44 @@ func GlobalRateLimiter() gin.HandlerFunc {
 	}
 }
 
-// handleRequestQueue 处理请求队列逻辑，抽取为独立函数以提高可读性
+// handleRequestQueue 处理请求队列逻辑
 func handleRequestQueue(c *gin.Context, qpsKey string, globalLimit *model.GlobalRateLimit) error {
-	// 获取当前队列长度
-	queueLength, err := common.GetQueueLength(qpsKey)
+	// 将检查队列长度和入队操作合并为原子操作
+	enqueueScript := `
+	local queueLen = redis.call('LLEN', KEYS[1])
+	if queueLen >= tonumber(ARGV[2]) then
+		return 0  -- 队列已满
+	end
+	
+	redis.call('RPUSH', KEYS[1], ARGV[1])
+	redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+	redis.call('SETEX', 'request_timeout:'..ARGV[1], tonumber(ARGV[3]), ARGV[4])
+	return 1  -- 成功入队
+	`
+
+	// 生成请求ID
+	requestId := uuid.New().String()
+	ctx := context.Background()
+	currentTime := fmt.Sprintf("%d", time.Now().Unix())
+
+	// 执行入队脚本
+	result, err := common.RDB.Eval(
+		ctx,
+		enqueueScript,
+		[]string{qpsKey},
+		requestId,
+		globalLimit.QueueCapacity,
+		globalLimit.QueueTimeout,
+		currentTime,
+	).Int64()
+
 	if err != nil {
-		return fmt.Errorf("failed to get queue length: %s", err.Error())
+		return fmt.Errorf("failed to check queue and enqueue: %s", err.Error())
 	}
 
 	// 如果队列已满，拒绝请求
-	if queueLength >= int64(globalLimit.QueueCapacity) {
+	if result == 0 {
+		logger.Warn(c.Request.Context(), "超过QPS限制，队列已满，拒绝请求！")
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"error": gin.H{
 				"message": "系统当前排队请求过多，请稍后再试",
@@ -361,19 +400,14 @@ func handleRequestQueue(c *gin.Context, qpsKey string, globalLimit *model.Global
 		return nil
 	}
 
-	// 生成请求ID并加入队列
-	requestId := uuid.New().String()
-	err = common.EnqueueRequest(qpsKey, requestId, globalLimit.QueueTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to enqueue request: %s", err.Error())
-	}
-
-	// 等待轮到本请求处理
+	// 等待轮到本请求处理 - 使用简化的轮询逻辑
 	startTime := time.Now()
 	for {
 		// 检查是否超时
-		elapsed := time.Since(startTime).Seconds()
-		if elapsed > float64(globalLimit.QueueTimeout) {
+		if time.Since(startTime).Seconds() > float64(globalLimit.QueueTimeout) {
+			// 超时后尝试从队列中移除该请求（非关键操作，失败也不影响）
+			common.RDB.LRem(ctx, qpsKey, 0, requestId)
+
 			c.JSON(http.StatusRequestTimeout, gin.H{
 				"error": gin.H{
 					"message": "请求等待超时，请稍后再试",
@@ -385,27 +419,37 @@ func handleRequestQueue(c *gin.Context, qpsKey string, globalLimit *model.Global
 			return nil
 		}
 
-		// 尝试从队列头取出请求
-		headRequestId, err := common.DequeueRequest(qpsKey)
+		// 获取队列头部（但不移除）
+		headId, err := common.RDB.LIndex(ctx, qpsKey, 0).Result()
 		if err != nil {
-			time.Sleep(100 * time.Millisecond) // 短暂暂停后重试
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		// 如果取出的请求ID是当前请求，则继续处理
-		if headRequestId == requestId {
+		// 如果是当前请求，原子地移除并处理
+		if headId == requestId {
+			// 使用LPOP原子地移除队列头
+			popResult, err := common.RDB.LPop(ctx, qpsKey).Result()
+			if err != nil || popResult != requestId {
+				// 可能在我们检查和移除之间，队列头发生了变化
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			// 成功移除，继续处理请求
 			c.Next()
 			return nil
 		}
 
-		// 不是当前请求，检查队列的请求是否已超时
-		isTimedOut, _ := common.IsRequestTimedOut(headRequestId)
-		if isTimedOut {
-			continue // 该请求已超时，继续检查下一个
+		// 不是当前请求，检查头部请求是否超时
+		timeoutExists, _ := common.RDB.Exists(ctx, "request_timeout:"+headId).Result()
+		if timeoutExists == 0 {
+			// 头部请求已超时，尝试移除
+			common.RDB.LPop(ctx, qpsKey)
+			continue
 		}
 
-		// 将请求重新放回队列头部，等待下一次轮询
-		common.EnqueueRequest(qpsKey, headRequestId, globalLimit.QueueTimeout)
+		// 等待一段时间再重试
 		time.Sleep(100 * time.Millisecond)
 	}
 }

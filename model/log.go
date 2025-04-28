@@ -51,6 +51,14 @@ func recordLogHelper(ctx context.Context, log *Log) {
 		return
 	}
 	logger.Infof(ctx, "record log: %+v", log)
+
+	// 更新Redis中的日配额使用量
+	if common.RedisEnabled && log.Type == LogTypeConsume && log.TokenName != "" {
+		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
+		if err != nil {
+			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
+		}
+	}
 }
 
 func RecordLog(ctx context.Context, userId int, logType int, content string) {
@@ -77,13 +85,6 @@ func RecordTopupLog(ctx context.Context, userId int, content string, quota int) 
 		Quota:     quota,
 	}
 	recordLogHelper(ctx, log)
-	// 更新Redis中的日配额使用量
-	if common.RedisEnabled && log.TokenName != "" {
-		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
-		if err != nil {
-			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
-		}
-	}
 }
 
 func RecordConsumeLog(ctx context.Context, log *Log) {
@@ -94,28 +95,12 @@ func RecordConsumeLog(ctx context.Context, log *Log) {
 	log.CreatedAt = helper.GetTimestamp()
 	log.Type = LogTypeConsume
 	recordLogHelper(ctx, log)
-
-	// 更新Redis中的日配额使用量
-	if common.RedisEnabled && log.TokenName != "" {
-		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
-		if err != nil {
-			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
-		}
-	}
 }
 
 func RecordTestLog(ctx context.Context, log *Log) {
 	log.CreatedAt = helper.GetTimestamp()
 	log.Type = LogTypeTest
 	recordLogHelper(ctx, log)
-
-	// 更新Redis中的日配额使用量
-	if common.RedisEnabled && log.TokenName != "" {
-		err := IncrTokenDailyUsage(log.TokenName, int64(log.Quota))
-		if err != nil {
-			logger.Error(ctx, "更新Redis中token日使用量失败: "+err.Error())
-		}
-	}
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int) (logs []*Log, err error) {

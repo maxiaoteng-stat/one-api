@@ -18,7 +18,7 @@ const TokenRateLimitModal = ({ open, tokenId, tokenName, onClose, onSuccess }) =
     token_id: tokenId,
     max_qps: 0,
     daily_quota: 0,
-    enabled: true
+    enabled: false
   };
   
   const [inputs, setInputs] = useState(defaultInputs);

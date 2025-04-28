@@ -26,23 +26,51 @@ func InitRedisClient() (err error) {
 		return nil
 	}
 	redisConnString := os.Getenv("REDIS_CONN_STRING")
-	if os.Getenv("REDIS_MASTER_NAME") == "" {
-		logger.SysLog("Redis is enabled")
-		opt, err := redis.ParseURL(redisConnString)
-		if err != nil {
-			logger.FatalLog("failed to parse Redis connection string: " + err.Error())
-		}
-		RDB = redis.NewClient(opt)
-	} else {
-		// cluster mode
+	redisMode := strings.ToLower(os.Getenv("REDIS_MODE"))
+
+	// 根据不同模式连接Redis
+	switch redisMode {
+	case "cluster":
+		// 集群模式
 		logger.SysLog("Redis cluster mode enabled")
-		RDB = redis.NewUniversalClient(&redis.UniversalOptions{
-			Addrs:      strings.Split(redisConnString, ","),
-			Password:   os.Getenv("REDIS_PASSWORD"),
-			MasterName: os.Getenv("REDIS_MASTER_NAME"),
+		RDB = redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:    strings.Split(redisConnString, ","),
+			Password: os.Getenv("REDIS_PASSWORD"),
 		})
+	case "sentinel":
+		// 哨兵模式
+		logger.SysLog("Redis sentinel mode enabled")
+		if os.Getenv("REDIS_MASTER_NAME") == "" {
+			logger.FatalLog("REDIS_MASTER_NAME not set, required for sentinel mode")
+		}
+		RDB = redis.NewFailoverClient(&redis.FailoverOptions{
+			MasterName:    os.Getenv("REDIS_MASTER_NAME"),
+			SentinelAddrs: strings.Split(redisConnString, ","),
+			Password:      os.Getenv("REDIS_PASSWORD"),
+			DB:            0,
+		})
+	default:
+		// 兼容以前的代码逻辑
+		if os.Getenv("REDIS_MASTER_NAME") != "" {
+			// 保持向后兼容，使用哨兵模式
+			logger.SysLog("Redis sentinel mode enabled (legacy config)")
+			RDB = redis.NewUniversalClient(&redis.UniversalOptions{
+				Addrs:      strings.Split(redisConnString, ","),
+				Password:   os.Getenv("REDIS_PASSWORD"),
+				MasterName: os.Getenv("REDIS_MASTER_NAME"),
+			})
+		} else {
+			// 单实例模式
+			logger.SysLog("Redis single instance mode enabled")
+			opt, err := redis.ParseURL(redisConnString)
+			if err != nil {
+				logger.FatalLog("failed to parse Redis connection string: " + err.Error())
+			}
+			RDB = redis.NewClient(opt)
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	_, err = RDB.Ping(ctx).Result()

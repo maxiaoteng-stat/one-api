@@ -59,9 +59,21 @@ func GetGlobalRateLimit() (*GlobalRateLimit, error) {
 
 	// 从数据库获取
 	if err := DB.First(&rateLimit).Error; err != nil {
-		// 如果不存在，直接返回错误
-		// 注意：在初始化阶段，会在InitRateLimitCache中创建默认配置
-		return nil, err
+		// 如果不存在，创建默认配置
+		rateLimit = GlobalRateLimit{
+			Enabled:          false,
+			MaxQPS:           100,
+			QueueCapacity:    20,
+			QueueTimeout:     10,
+			DailyQuota:       100000000,
+			WarningThreshold: 80,
+			UpdatedAt:        helper.GetTimestamp(),
+		}
+
+		// 保存到数据库
+		if err := DB.Create(&rateLimit).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	// 存入缓存
