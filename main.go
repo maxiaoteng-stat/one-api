@@ -126,6 +126,8 @@ func main() {
 	model.InitDailyUsageCache()
 	// 加载限流配置到Redis
 	model.InitRateLimitCache()
+	// 初始化负载均衡轮询策略
+	model.InitBalanceStrategies()
 
 	logger.SysLogf("server started on http://localhost:%s", port)
 	err = server.Run(":" + port)

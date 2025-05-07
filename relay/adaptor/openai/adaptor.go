@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/relay/adaptor"
 	"github.com/songquanpeng/one-api/relay/adaptor/alibailian"
 	"github.com/songquanpeng/one-api/relay/adaptor/baiduv2"
@@ -92,6 +94,70 @@ func (a *Adaptor) ConvertRequest(c *gin.Context, relayMode int, request *model.G
 		}
 		request.StreamOptions.IncludeUsage = true
 	}
+
+	// 处理extra_body字段
+	if request.ExtraBody != nil {
+		// 将请求转换为map
+		requestMap := make(map[string]interface{})
+		requestJSON, err := json.Marshal(request)
+		if err == nil {
+			err = json.Unmarshal(requestJSON, &requestMap)
+			if err != nil {
+				// 如果转换失败，记录错误但继续处理
+				logger.SysError("Failed to convert request to map: " + err.Error())
+			} else {
+				// 删除原始的extra_body字段
+				delete(requestMap, "extra_body")
+
+				// 提取extra_body内容
+				var extraBodyMap map[string]interface{}
+
+				switch eb := request.ExtraBody.(type) {
+				case map[string]interface{}:
+					extraBodyMap = eb
+				case string:
+					// 如果是字符串，尝试解析为JSON
+					err = json.Unmarshal([]byte(eb), &extraBodyMap)
+					if err != nil {
+						logger.SysError("Failed to parse extra_body string: " + err.Error())
+					}
+				default:
+					// 其他类型尝试通过JSON转换
+					extraBodyJSON, err := json.Marshal(request.ExtraBody)
+					if err == nil {
+						err = json.Unmarshal(extraBodyJSON, &extraBodyMap)
+						if err != nil {
+							logger.SysError("Failed to parse extra_body: " + err.Error())
+						}
+					}
+				}
+
+				// 将extra_body的字段合并到请求中
+				if extraBodyMap != nil {
+					for k, v := range extraBodyMap {
+						requestMap[k] = v
+					}
+				}
+
+				// 将map转回请求对象
+				newRequestJSON, err := json.Marshal(requestMap)
+				if err == nil {
+					// 创建一个新的请求对象
+					newRequest := &model.GeneralOpenAIRequest{}
+					err = json.Unmarshal(newRequestJSON, newRequest)
+					if err == nil {
+						// 返回合并后的请求
+						return newRequest, nil
+					}
+					logger.SysError("Failed to convert map back to request: " + err.Error())
+				} else {
+					logger.SysError("Failed to convert map to JSON: " + err.Error())
+				}
+			}
+		}
+	}
+
+	// 如果处理extra_body失败或不存在extra_body，返回原始请求
 	return request, nil
 }
 

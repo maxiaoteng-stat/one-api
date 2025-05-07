@@ -66,6 +66,11 @@ type GeneralOpenAIRequest struct {
 	// Others
 	Instruction string `json:"instruction,omitempty"`
 	NumCtx      int    `json:"num_ctx,omitempty"`
+	//qwen3
+	ExtraBody          interface{} `json:"extra_body,omitempty"`
+	ChatTemplateKwargs interface{} `json:"chat_template_kwargs,omitempty"`
+	//新增min_p
+	MinP *float64 `json:"min_p,omitempty"`
 }
 
 func (r GeneralOpenAIRequest) ParseInput() []string {

@@ -69,12 +69,30 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 	startTime := time.Now()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+
+	// 根据模型类型选择正确的API路径
+	apiPath := "/v1/chat/completions"
+	relayMode := relaymode.ChatCompletions
+
+	// 检测是否为嵌入模型
+	modelName := request.Model
+	if isEmbeddingModel(modelName) {
+		apiPath = "/v1/embeddings"
+		relayMode = relaymode.Embeddings
+
+		// 确保请求格式正确（嵌入模型需要input字段而非messages）
+		if len(request.Messages) > 0 && request.Input == nil && request.Messages[0].Content != "" {
+			request.Input = request.Messages[0].Content
+		}
+	}
+
 	c.Request = &http.Request{
 		Method: "POST",
-		URL:    &url.URL{Path: "/v1/chat/completions"},
+		URL:    &url.URL{Path: apiPath},
 		Body:   nil,
 		Header: make(http.Header),
 	}
+
 	c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(ctxkey.Channel, channel.Type)
@@ -89,7 +107,8 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 		return "", fmt.Errorf("invalid api type: %d, adaptor is nil", apiType), nil
 	}
 	adaptor.Init(meta)
-	modelName := request.Model
+
+	// 处理模型名称和映射...
 	modelMap := channel.GetModelMapping()
 	if modelName == "" || !strings.Contains(channel.Models, modelName) {
 		modelNames := strings.Split(channel.Models, ",")
@@ -102,7 +121,9 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 	}
 	meta.OriginModelName, meta.ActualModelName = request.Model, modelName
 	request.Model = modelName
-	convertedRequest, err := adaptor.ConvertRequest(c, relaymode.ChatCompletions, request)
+
+	// 使用正确的relayMode进行请求转换
+	convertedRequest, err := adaptor.ConvertRequest(c, relayMode, request)
 	if err != nil {
 		return "", err, nil
 	}
@@ -151,7 +172,16 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 		return "", errors.New("usage is nil"), nil
 	}
 	rawResponse := w.Body.String()
-	_, responseMessage, err = parseTestResponse(rawResponse)
+
+	// 响应解析部分需要根据模型类型不同进行处理
+	if isEmbeddingModel(modelName) {
+		// 解析嵌入模型响应
+		responseMessage, err = parseEmbeddingTestResponse(rawResponse)
+	} else {
+		// 解析聊天模型响应
+		_, responseMessage, err = parseTestResponse(rawResponse)
+	}
+
 	if err != nil {
 		logger.SysError(fmt.Sprintf("failed to parse error: %s, \nresponse: %s", err.Error(), rawResponse))
 		return "", err, nil
@@ -164,6 +194,52 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 	}
 	logger.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return responseMessage, nil, nil
+}
+
+// 判断是否为嵌入模型
+func isEmbeddingModel(modelName string) bool {
+	// 检查模型名称是否包含embedding关键词
+	embeddingKeywords := []string{
+		"embedding", "embed", "text-embedding", "bge-",
+		"data/bge-",
+	}
+
+	modelNameLower := strings.ToLower(modelName)
+	for _, keyword := range embeddingKeywords {
+		if strings.Contains(modelNameLower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// 解析嵌入模型的测试响应
+func parseEmbeddingTestResponse(rawResponse string) (string, error) {
+	var response map[string]interface{}
+	err := json.Unmarshal([]byte(rawResponse), &response)
+	if err != nil {
+		return "", err
+	}
+
+	// 检查是否有嵌入数据
+	data, ok := response["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return "嵌入向量生成成功，但无数据返回", nil
+	}
+
+	// 获取第一个嵌入向量的维度
+	firstEmbedding, ok := data[0].(map[string]interface{})
+	if !ok {
+		return "嵌入向量格式异常", nil
+	}
+
+	embedding, ok := firstEmbedding["embedding"].([]interface{})
+	if !ok {
+		return "嵌入向量格式异常", nil
+	}
+
+	return fmt.Sprintf("嵌入向量生成成功，维度: %d", len(embedding)), nil
 }
 
 func TestChannel(c *gin.Context) {
