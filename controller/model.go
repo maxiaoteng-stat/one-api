@@ -2,6 +2,9 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	"github.com/songquanpeng/one-api/model"
@@ -11,8 +14,6 @@ import (
 	"github.com/songquanpeng/one-api/relay/channeltype"
 	"github.com/songquanpeng/one-api/relay/meta"
 	relaymodel "github.com/songquanpeng/one-api/relay/model"
-	"net/http"
-	"strings"
 )
 
 // https://platform.openai.com/docs/api-reference/models/list
@@ -144,12 +145,13 @@ func ListModels(c *gin.Context) {
 		modelSet[availableModel] = true
 	}
 	availableOpenAIModels := make([]OpenAIModels, 0)
-	for _, model := range models {
-		if _, ok := modelSet[model.Id]; ok {
-			modelSet[model.Id] = false
-			availableOpenAIModels = append(availableOpenAIModels, model)
-		}
-	}
+	// 注释后只保留自定义模型，不处理预定义模型
+	// for _, model := range models {
+	// 	if _, ok := modelSet[model.Id]; ok {
+	// 		modelSet[model.Id] = false
+	// 		availableOpenAIModels = append(availableOpenAIModels, model)
+	// 	}
+	// }
 	for modelName, ok := range modelSet {
 		if ok {
 			availableOpenAIModels = append(availableOpenAIModels, OpenAIModels{

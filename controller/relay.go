@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common"
@@ -43,6 +45,82 @@ func relayHelper(c *gin.Context, relayMode int) *model.ErrorWithStatusCode {
 }
 
 func Relay(c *gin.Context) {
+	ctx := c.Request.Context()
+	relayMode := relaymode.GetByPath(c.Request.URL.Path)
+	if config.DebugEnabled {
+		requestBody, _ := common.GetRequestBody(c)
+		logger.Debugf(ctx, "request body: %s", string(requestBody))
+	}
+	channelId := c.GetInt(ctxkey.ChannelId)
+	userId := c.GetInt(ctxkey.Id)
+	bizErr := relayHelper(c, relayMode)
+	if bizErr == nil {
+		monitor.Emit(channelId, true)
+		return
+	}
+	lastFailedChannelId := channelId
+	channelName := c.GetString(ctxkey.ChannelName)
+	group := c.GetString(ctxkey.Group)
+	originalModel := c.GetString(ctxkey.OriginalModel)
+	go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	requestId := c.GetString(helper.RequestIdKey)
+	retryTimes := config.RetryTimes
+	if !shouldRetry(c, bizErr.StatusCode) {
+		logger.Errorf(ctx, "relay error happen, status code is %d, won't retry in this case", bizErr.StatusCode)
+		retryTimes = 0
+	}
+	for i := retryTimes; i > 0; i-- {
+		channel, err := dbmodel.CacheGetRandomSatisfiedChannel(group, originalModel, i != retryTimes)
+		if err != nil {
+			logger.Errorf(ctx, "CacheGetRandomSatisfiedChannel failed: %+v", err)
+			break
+		}
+		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
+		if channel.Id == lastFailedChannelId {
+			continue
+		}
+		middleware.SetupContextForSelectedChannel(c, channel, originalModel)
+		requestBody, err := common.GetRequestBody(c)
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+		bizErr = relayHelper(c, relayMode)
+		if bizErr == nil {
+			return
+		}
+		channelId := c.GetInt(ctxkey.ChannelId)
+		lastFailedChannelId = channelId
+		channelName := c.GetString(ctxkey.ChannelName)
+		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	}
+	if bizErr != nil {
+		if bizErr.StatusCode == http.StatusTooManyRequests {
+			bizErr.Error.Message = "当前分组上游负载已饱和，请稍后再试"
+		}
+
+		// BUG: bizErr is in race condition
+		bizErr.Error.Message = helper.MessageWithRequestId(bizErr.Error.Message, requestId)
+		c.JSON(bizErr.StatusCode, gin.H{
+			"error": bizErr.Error,
+		})
+	}
+}
+
+func RelayTest(c *gin.Context) {
+	//请求头加入test_flag参数，bool类型
+	c.Request.Header.Set("test_flag", "true")
+
+	// 修改/v1/test/completions为/v1/completions
+	originalPath := c.Request.URL.Path
+	newPath := strings.Replace(originalPath, "/v1/test/", "/v1/", 1)
+	c.Request.URL.Path = newPath
+
+	// 重要：重新解析URL，确保c.Request.URL.String()返回正确的URL
+	// 这将修正RequestURLPath
+	if originalPath != newPath {
+		if parsedURL, err := url.Parse(c.Request.URL.String()); err == nil {
+			c.Request.URL = parsedURL
+		}
+	}
+
 	ctx := c.Request.Context()
 	relayMode := relaymode.GetByPath(c.Request.URL.Path)
 	if config.DebugEnabled {
