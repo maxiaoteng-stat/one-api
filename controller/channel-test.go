@@ -84,6 +84,20 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 		if len(request.Messages) > 0 && request.Input == nil && request.Messages[0].Content != "" {
 			request.Input = request.Messages[0].Content
 		}
+	} else if isRerankModel(modelName) {
+		// 添加对rerank模型的支持
+		apiPath = "/v1/rerank"
+		relayMode = relaymode.Rerank
+
+		// 确保请求格式正确（rerank模型需要query和documents字段）
+		if len(request.Messages) > 0 && request.Query == nil && request.Messages[0].Content != "" {
+			request.Query = request.Messages[0].Content
+		}
+
+		// 如果没有documents字段，添加一个示例文档
+		if request.Documents == nil || len(request.Documents) == 0 {
+			request.Documents = []string{"This is Rerank testing."}
+		}
 	}
 
 	c.Request = &http.Request{
@@ -177,6 +191,9 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 	if isEmbeddingModel(modelName) {
 		// 解析嵌入模型响应
 		responseMessage, err = parseEmbeddingTestResponse(rawResponse)
+	} else if isRerankModel(modelName) {
+		// 解析rerank模型响应
+		responseMessage, err = parseRerankTestResponse(rawResponse)
 	} else {
 		// 解析聊天模型响应
 		_, responseMessage, err = parseTestResponse(rawResponse)
@@ -242,6 +259,41 @@ func parseEmbeddingTestResponse(rawResponse string) (string, error) {
 	return fmt.Sprintf("嵌入向量生成成功，维度: %d", len(embedding)), nil
 }
 
+// 判断是否为rerank模型
+func isRerankModel(modelName string) bool {
+	// 检查模型名称是否包含rerank关键词
+	rerankKeywords := []string{
+		"rerank", "re-rank", "reranker", "re-ranker", "cohere-rerank",
+	}
+
+	modelNameLower := strings.ToLower(modelName)
+	for _, keyword := range rerankKeywords {
+		if strings.Contains(modelNameLower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// 解析rerank模型的测试响应
+func parseRerankTestResponse(rawResponse string) (string, error) {
+	var response map[string]interface{}
+	err := json.Unmarshal([]byte(rawResponse), &response)
+	if err != nil {
+		return "", err
+	}
+
+	// 检查是否有结果数据
+	results, ok := response["results"].([]interface{})
+	if !ok || len(results) == 0 {
+		return "重排序成功，但无结果返回", nil
+	}
+
+	// 获取结果数量
+	return fmt.Sprintf("重排序成功，返回 %d 个结果", len(results)), nil
+}
+
 func TestChannel(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.Atoi(c.Param("id"))
@@ -292,6 +344,16 @@ func TestChannel(c *gin.Context) {
 var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
+// 定义渠道测试结果结构体
+type ChannelTestResult struct {
+	ID           int       `json:"id"`
+	Name         string    `json:"name"`
+	Success      bool      `json:"success"`
+	ErrorMessage string    `json:"error_message,omitempty"` // Only include if there's an error
+	ResponseTime int64     `json:"response_time"`
+	StartTime    time.Time `json:"start_time"` // 记录测试开始的时间
+}
+
 func testChannels(ctx context.Context, notify bool, scope string) error {
 	if config.RootUserEmail == "" {
 		config.RootUserEmail = model.GetRootUserEmail()
@@ -311,14 +373,27 @@ func testChannels(ctx context.Context, notify bool, scope string) error {
 	if disableThreshold == 0 {
 		disableThreshold = 10000000 // a impossible value
 	}
+
 	go func() {
+		// 确保 goroutine 结束后释放锁和设置标志
+		defer func() {
+			testAllChannelsLock.Lock()
+			testAllChannelsRunning = false
+			testAllChannelsLock.Unlock()
+		}()
+
+		// 用于收集所有渠道的测试结果
+		var testResults []ChannelTestResult
+
 		for _, channel := range channels {
+			startTime := time.Now()
 			isChannelEnabled := channel.Status == model.ChannelStatusEnabled
 			tik := time.Now()
-			testRequest := buildTestRequest("")
+			testRequest := buildTestRequest(channel.Models)
 			_, err, openaiErr := testChannel(ctx, channel, testRequest)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
+
 			if isChannelEnabled && milliseconds > disableThreshold {
 				err = fmt.Errorf("响应时间 %.2fs 超过阈值 %.2fs", float64(milliseconds)/1000.0, float64(disableThreshold)/1000.0)
 				if config.AutomaticDisableChannelEnabled {
@@ -334,11 +409,39 @@ func testChannels(ctx context.Context, notify bool, scope string) error {
 				monitor.EnableChannel(channel.Id, channel.Name)
 			}
 			channel.UpdateResponseTime(milliseconds)
+
+			// 记录当前渠道的测试结果
+			result := ChannelTestResult{
+				ID:           channel.Id,
+				Name:         channel.Name,
+				Success:      err == nil && openaiErr == nil, // 成功条件
+				ResponseTime: milliseconds,
+				StartTime:    startTime,
+			}
+			if err != nil {
+				result.ErrorMessage = err.Error()
+			} else if openaiErr != nil {
+				result.ErrorMessage = openaiErr.Message
+			}
+			testResults = append(testResults, result) // 将结果添加到切片中
+
 			time.Sleep(config.RequestInterval)
 		}
-		testAllChannelsLock.Lock()
-		testAllChannelsRunning = false
-		testAllChannelsLock.Unlock()
+
+		// 将测试结果序列化为 JSON
+		resultsJSON, marshalErr := json.Marshal(testResults)
+		if marshalErr != nil {
+			logger.SysError(fmt.Sprintf("failed to marshal test results: %s", marshalErr.Error()))
+		} else {
+			// 保存 resultsJSON 到 options 表中，使用键 "last_channel_test_results"
+			saveErr := model.UpdateOption("last_channel_test_results", string(resultsJSON))
+			if saveErr != nil {
+				logger.SysError(fmt.Sprintf("failed to save test results to options: %s", saveErr.Error()))
+			} else {
+				logger.SysLog("Channel test results saved to options.")
+			}
+		}
+
 		if notify {
 			err := message.Notify(message.ByAll, "渠道测试完成", "", "渠道测试完成，如果没有收到禁用通知，说明所有渠道都正常")
 			if err != nil {
@@ -375,7 +478,39 @@ func AutomaticallyTestChannels(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Minute)
 		logger.SysLog("testing all channels")
-		_ = testChannels(ctx, false, "all")
+		_ = testChannels(ctx, false, "enabled")
 		logger.SysLog("channel test finished")
 	}
+}
+
+// GetLastChannelTestResults 获取上一次渠道测试结果
+func GetLastChannelTestResults(c *gin.Context) {
+	// 从 config.OptionMap 中读取保存的测试结果
+	testResultsJSON, exists := config.OptionMap["last_channel_test_results"]
+	if !exists {
+		// 如果不存在，返回空数组或适当的错误
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "No previous test results found",
+			"data":    []ChannelTestResult{}, // 返回空数组
+		})
+		return
+	}
+
+	var testResults []ChannelTestResult
+	err := json.Unmarshal([]byte(testResultsJSON), &testResults)
+	if err != nil {
+		logger.SysError(fmt.Sprintf("failed to unmarshal test results: %s", err.Error()))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Failed to parse test results",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Successfully retrieved last test results",
+		"data":    testResults,
+	})
 }

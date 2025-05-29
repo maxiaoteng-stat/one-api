@@ -60,6 +60,8 @@ func GetAllChannels(startIdx int, num int, scope string) ([]*Channel, error) {
 		err = DB.Order("id desc").Find(&channels).Error
 	case "disabled":
 		err = DB.Order("id desc").Where("status = ? or status = ?", ChannelStatusAutoDisabled, ChannelStatusManuallyDisabled).Find(&channels).Error
+	case "enabled":
+		err = DB.Order("id desc").Where("status =?", ChannelStatusEnabled).Find(&channels).Error
 	default:
 		err = DB.Order("id desc").Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
 	}

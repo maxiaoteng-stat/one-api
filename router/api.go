@@ -83,6 +83,8 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.PUT("/", controller.UpdateChannel)
 			channelRoute.DELETE("/disabled", controller.DeleteDisabledChannel)
 			channelRoute.DELETE("/:id", controller.DeleteChannel)
+			channelRoute.GET("/last_test_results", controller.GetLastChannelTestResults)
+
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

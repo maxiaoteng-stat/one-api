@@ -70,7 +70,7 @@ func InitRedisClient() (err error) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 
 	_, err = RDB.Ping(ctx).Result()

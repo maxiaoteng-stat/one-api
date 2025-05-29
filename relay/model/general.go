@@ -66,6 +66,9 @@ type GeneralOpenAIRequest struct {
 	// Others
 	Instruction string `json:"instruction,omitempty"`
 	NumCtx      int    `json:"num_ctx,omitempty"`
+	// Rerank
+	Query     any      `json:"query,omitempty"`
+	Documents []string `json:"documents,omitempty"`
 	//qwen3
 	ExtraBody          interface{} `json:"extra_body,omitempty"`
 	ChatTemplateKwargs interface{} `json:"chat_template_kwargs,omitempty"`

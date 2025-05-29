@@ -87,6 +87,7 @@ const ChannelsTable = () => {
   const [updatingBalance, setUpdatingBalance] = useState(false);
   const [showPrompt, setShowPrompt] = useState(shouldShowPrompt(promptID));
   const [showDetail, setShowDetail] = useState(isShowDetail());
+  const [testResults, setTestResults] = useState([]);
 
   const processChannelData = (channel) => {
     if (channel.models === '') {
@@ -109,6 +110,37 @@ const ChannelsTable = () => {
     return channel;
   };
 
+  const fetchTestResults = async (channelsData = channels) => {
+    try {
+      const res = await API.get('/api/channel/last_test_results');
+      const { success, message, data } = res.data;
+      if (success) {
+        setTestResults(data);
+        // 获取所有失败的测试结果
+        const failedTests = Array.isArray(data) ? data.filter(test => !test.success) : [];
+        if (failedTests.length > 0) {
+          // 分条显示所有失败的测试结果
+          failedTests.forEach(test => {
+            // 标准化显示时间
+            const formattedTime = test.start_time ? 
+              timestamp2string(new Date(test.start_time).getTime() / 1000) : 
+              '未知时间';
+            // 查找当前渠道在channels数组中的状态
+            const channel = channelsData.find(channel => channel.id === test.id);
+            // 只有当渠道存在且状态为启用(1)时才显示错误信息
+            if (channel && channel.status === 1) {
+              showError(`ID:${test.id} 渠道「${test.name}」 测试时间: ${formattedTime}`);
+            }
+          });
+        }
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(error.message);
+    }
+  };
+
   const loadChannels = async (startIdx) => {
     const res = await API.get(`/api/channel/?p=${startIdx}`);
     const { success, message, data } = res.data;
@@ -116,6 +148,8 @@ const ChannelsTable = () => {
       let localChannels = data.map(processChannelData);
       if (startIdx === 0) {
         setChannels(localChannels);
+        // 传递最新的channels数据给fetchTestResults
+        fetchTestResults(localChannels);
       } else {
         let newChannels = [...channels];
         newChannels.splice(
@@ -124,6 +158,8 @@ const ChannelsTable = () => {
           ...localChannels
         );
         setChannels(newChannels);
+        // 传递最新获取到的channels数据给fetchTestResults
+        fetchTestResults(localChannels);
       }
     } else {
       showError(message);
