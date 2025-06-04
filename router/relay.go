@@ -27,7 +27,7 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		relayV1Router.Any("/oneapi/proxy/:channelid/*target", controller.Relay)
 		relayV1Router.POST("/completions", controller.Relay)
-		relayV1Router.POST("/test/completions", controller.RelayTest)
+		// relayV1Router.POST("/test/completions", controller.RelayTest)
 		relayV1Router.POST("/chat/completions", controller.Relay)
 		relayV1Router.POST("/edits", controller.Relay)
 		relayV1Router.POST("/images/generations", controller.Relay)

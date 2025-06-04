@@ -76,15 +76,7 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 
 	// 检测是否为嵌入模型
 	modelName := request.Model
-	if isEmbeddingModel(modelName) {
-		apiPath = "/v1/embeddings"
-		relayMode = relaymode.Embeddings
-
-		// 确保请求格式正确（嵌入模型需要input字段而非messages）
-		if len(request.Messages) > 0 && request.Input == nil && request.Messages[0].Content != "" {
-			request.Input = request.Messages[0].Content
-		}
-	} else if isRerankModel(modelName) {
+	if isRerankModel(modelName) {
 		// 添加对rerank模型的支持
 		apiPath = "/v1/rerank"
 		relayMode = relaymode.Rerank
@@ -97,6 +89,14 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 		// 如果没有documents字段，添加一个示例文档
 		if request.Documents == nil || len(request.Documents) == 0 {
 			request.Documents = []string{"This is Rerank testing."}
+		}
+	} else if isEmbeddingModel(modelName) {
+		apiPath = "/v1/embeddings"
+		relayMode = relaymode.Embeddings
+
+		// 确保请求格式正确（嵌入模型需要input字段而非messages）
+		if len(request.Messages) > 0 && request.Input == nil && request.Messages[0].Content != "" {
+			request.Input = request.Messages[0].Content
 		}
 	}
 
@@ -188,12 +188,12 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 	rawResponse := w.Body.String()
 
 	// 响应解析部分需要根据模型类型不同进行处理
-	if isEmbeddingModel(modelName) {
-		// 解析嵌入模型响应
-		responseMessage, err = parseEmbeddingTestResponse(rawResponse)
-	} else if isRerankModel(modelName) {
+	if isRerankModel(modelName) {
 		// 解析rerank模型响应
 		responseMessage, err = parseRerankTestResponse(rawResponse)
+	} else if isEmbeddingModel(modelName) {
+		// 解析嵌入模型响应
+		responseMessage, err = parseEmbeddingTestResponse(rawResponse)
 	} else {
 		// 解析聊天模型响应
 		_, responseMessage, err = parseTestResponse(rawResponse)

@@ -15,6 +15,7 @@ import (
 	"github.com/songquanpeng/one-api/common/client"
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/i18n"
+	"github.com/songquanpeng/one-api/common/kafka"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/controller"
 	"github.com/songquanpeng/one-api/middleware"
@@ -98,6 +99,18 @@ func main() {
 	if err := i18n.Init(); err != nil {
 		logger.FatalLog("failed to initialize i18n: " + err.Error())
 	}
+
+	// Initialize Kafka Producer
+	err = kafka.InitKafkaProducer()
+	if err != nil {
+		logger.FatalLog("failed to initialize Kafka producer: " + err.Error())
+	}
+	defer func() {
+		err := kafka.CloseKafkaProducer()
+		if err != nil {
+			logger.SysError("failed to close Kafka producer: " + err.Error())
+		}
+	}()
 
 	// Initialize HTTP server
 	server := gin.New()
