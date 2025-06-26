@@ -454,7 +454,7 @@ const Dashboard = () => {
 
   // 获取渠道列表
   const fetchChannels = async () => {
-    await utils.fetchApi('/api/channel/', (channelData) => {
+    await utils.fetchApi('/api/channel/search?keyword=', (channelData) => {
       // 格式化渠道数据
       const formattedChannels = channelData.map(channel => ({
         key: channel.id,

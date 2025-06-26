@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -444,8 +443,8 @@ func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string,
 	return stats, err
 }
 
-// GetDailyUsageStats 获取特定token在一段时间内按天统计的使用次数
-func GetDailyUsageStats(tokenKey string, startTimestamp int64, endTimestamp int64) (map[string]int, error) {
+// GetCombinedDailyUsageStats 获取多个token的合并日使用统计
+func GetCombinedDailyUsageStats(tokenKeys []string, startTimestamp int64, endTimestamp int64) (map[string]int, bool) {
 	// 构建日期格式选择
 	groupSelect := "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as day"
 	if common.UsingPostgreSQL {
@@ -455,36 +454,54 @@ func GetDailyUsageStats(tokenKey string, startTimestamp int64, endTimestamp int6
 		groupSelect = "strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) as day"
 	}
 
-	// 从tokens表中查询该key对应的token
-	var token Token
+	// 查询所有有效的token
+	var tokens []Token
 	keyCol := "`key`"
 	if common.UsingPostgreSQL {
 		keyCol = `"key"`
 	}
-	err := DB.Where(keyCol+" = ?", tokenKey).First(&token).Error
+	err := DB.Where(keyCol+" IN (?)", tokenKeys).Find(&tokens).Error
 	if err != nil {
-		return nil, errors.New("无效的令牌")
+		// 出现错误，返回空结果
+		return make(map[string]int), true
 	}
 
-	// 查询日志统计
+	// 提取有效的token名称
+	var validTokenNames []string
+	for _, token := range tokens {
+		validTokenNames = append(validTokenNames, token.Name)
+	}
+
+	hasErrors := len(validTokenNames) != len(tokenKeys) // 如果有无效token则标记有错误
+
+	if len(validTokenNames) == 0 {
+		return make(map[string]int), true
+	}
+
+	// 查询日志统计，直接按日期聚合所有token的使用量
 	var results []struct {
 		Day   string `gorm:"column:day"`
 		Count int    `gorm:"column:count"`
 	}
 
+	// 修复SQL：移除重复的type条件
 	tx := LOG_DB.Raw(`
-		SELECT `+groupSelect+`, COUNT(1) as count
-		FROM logs
-		WHERE type = ? 
-		AND token_name = ?
-		AND created_at BETWEEN ? AND ?
+		SELECT day, SUM(count_per_token) as count
+		FROM (
+			SELECT `+groupSelect+`, COUNT(1) as count_per_token
+			FROM logs
+			WHERE type = ? 
+			AND token_name IN (?)
+			AND created_at BETWEEN ? AND ?
+			GROUP BY token_name, day
+		) as daily_counts
 		GROUP BY day
 		ORDER BY day ASC
-	`, LogTypeConsume, token.Name, startTimestamp, endTimestamp)
+	`, LogTypeConsume, validTokenNames, startTimestamp, endTimestamp)
 
 	err = tx.Scan(&results).Error
 	if err != nil {
-		return nil, err
+		return make(map[string]int), true
 	}
 
 	// 转换为map格式
@@ -493,31 +510,43 @@ func GetDailyUsageStats(tokenKey string, startTimestamp int64, endTimestamp int6
 		usageMap[r.Day] = r.Count
 	}
 
-	return usageMap, nil
+	return usageMap, hasErrors
 }
 
-// GetTotalUsage 获取指定token的总使用次数
-func GetTotalUsage(tokenKey string) (int, error) {
-	// 从tokens表中查询该key对应的token
-	var token Token
+// GetCombinedTotalUsage 获取多个token的合并总使用量
+func GetCombinedTotalUsage(tokenKeys []string) (int, bool) {
+	// 查询所有有效的token
+	var tokens []Token
 	keyCol := "`key`"
 	if common.UsingPostgreSQL {
 		keyCol = `"key"`
 	}
-	err := DB.Where(keyCol+" = ?", tokenKey).First(&token).Error
+	err := DB.Where(keyCol+" IN (?)", tokenKeys).Find(&tokens).Error
 	if err != nil {
-		return 0, errors.New("无效的令牌")
+		return 0, true
 	}
 
-	// 查询该token的总使用次数
-	var count int64
+	// 提取有效的token名称
+	var validTokenNames []string
+	for _, token := range tokens {
+		validTokenNames = append(validTokenNames, token.Name)
+	}
+
+	hasErrors := len(validTokenNames) != len(tokenKeys) // 如果有无效token则标记有错误
+
+	if len(validTokenNames) == 0 {
+		return 0, true
+	}
+
+	// 查询所有token的总使用次数
+	var totalCount int64
 	err = LOG_DB.Model(&Log{}).
-		Where("token_name = ? AND type = ?", token.Name, LogTypeConsume).
-		Count(&count).Error
+		Where("token_name IN (?) AND type = ?", validTokenNames, LogTypeConsume).
+		Count(&totalCount).Error
 
 	if err != nil {
-		return 0, err
+		return 0, true
 	}
 
-	return int(count), nil
+	return int(totalCount), hasErrors
 }

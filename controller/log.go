@@ -334,12 +334,13 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 	})
 }
 
-// GetDailyUsageStats 获取特定token在一段时间内按天统计的使用次数
+// GetDailyUsageStats 获取多个token在一段时间内按天统计的使用次数（合并结果）
 func GetDailyUsageStats(c *gin.Context) {
 	var requestData struct {
-		Key       string `json:"key"`
-		StartTime int64  `json:"start_time"`
-		EndTime   int64  `json:"end_time"`
+		Keys      []string `json:"keys"` // 改为支持多个key
+		Key       string   `json:"key"`  // 保持向后兼容
+		StartTime int64    `json:"start_time"`
+		EndTime   int64    `json:"end_time"`
 	}
 
 	if err := c.ShouldBindJSON(&requestData); err != nil {
@@ -351,8 +352,13 @@ func GetDailyUsageStats(c *gin.Context) {
 		return
 	}
 
-	// 验证并提取token
-	if requestData.Key == "" {
+	// 处理keys参数，支持向后兼容
+	var keys []string
+	if len(requestData.Keys) > 0 {
+		keys = requestData.Keys
+	} else if requestData.Key != "" {
+		keys = []string{requestData.Key}
+	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"code": 400,
 			"msg":  "缺少token参数",
@@ -362,7 +368,10 @@ func GetDailyUsageStats(c *gin.Context) {
 	}
 
 	// 去除sk-前缀
-	key := strings.TrimPrefix(requestData.Key, "sk-")
+	processedKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		processedKeys = append(processedKeys, strings.TrimPrefix(key, "sk-"))
+	}
 
 	// 验证时间范围
 	if requestData.StartTime == 0 || requestData.EndTime == 0 {
@@ -374,11 +383,14 @@ func GetDailyUsageStats(c *gin.Context) {
 		return
 	}
 
-	usageData, err := model.GetDailyUsageStats(key, requestData.StartTime, requestData.EndTime)
-	if err != nil {
+	// 获取合并后的使用统计
+	usageData, hasErrors := model.GetCombinedDailyUsageStats(processedKeys, requestData.StartTime, requestData.EndTime)
+
+	// 如果有无效token，返回400错误
+	if hasErrors {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  "获取使用统计失败: " + err.Error(),
+			"code": 400,
+			"msg":  "存在无效的token",
 			"data": nil,
 		})
 		return
@@ -391,11 +403,18 @@ func GetDailyUsageStats(c *gin.Context) {
 	})
 }
 
-// GetTotalTokenUsageStats 获取token的总使用次数
+// GetTotalUsageStats 获取多个token的总使用次数（合并结果）
 func GetTotalUsageStats(c *gin.Context) {
-	key := c.Query("key")
+	keysParam := c.Query("keys")
+	keyParam := c.Query("key") // 保持向后兼容
 
-	if key == "" {
+	var keys []string
+	if keysParam != "" {
+		// 解析keys参数（用逗号分隔）
+		keys = strings.Split(keysParam, ",")
+	} else if keyParam != "" {
+		keys = []string{keyParam}
+	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"code": 400,
 			"msg":  "缺少token参数",
@@ -404,14 +423,32 @@ func GetTotalUsageStats(c *gin.Context) {
 		return
 	}
 
-	// 去除sk-前缀
-	accessToken := strings.TrimPrefix(key, "sk-")
+	// 去除sk-前缀并清理空白字符
+	processedKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey != "" {
+			processedKeys = append(processedKeys, strings.TrimPrefix(trimmedKey, "sk-"))
+		}
+	}
 
-	totalUsage, err := model.GetTotalUsage(accessToken)
-	if err != nil {
+	if len(processedKeys) == 0 {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  "获取使用统计失败: " + err.Error(),
+			"code": 400,
+			"msg":  "没有有效的token参数",
+			"data": nil,
+		})
+		return
+	}
+
+	// 获取合并后的总使用量
+	totalUsage, hasErrors := model.GetCombinedTotalUsage(processedKeys)
+
+	// 如果有无效token，返回400错误
+	if hasErrors {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 400,
+			"msg":  "存在无效的token",
 			"data": nil,
 		})
 		return
