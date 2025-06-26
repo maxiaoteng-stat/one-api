@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/songquanpeng/one-api/common/helper"
 	"github.com/songquanpeng/one-api/relay/constant/role"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
+	"github.com/songquanpeng/one-api/common/kafka"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/model"
 	"github.com/songquanpeng/one-api/relay/adaptor/openai"
@@ -109,8 +111,6 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 	}
 	totalTokens := promptTokens + completionTokens
 	if totalTokens == 0 {
-		// in this case, must be some error happened
-		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
 	}
 	quotaDelta := quota - preConsumedQuota
@@ -139,8 +139,59 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 		ElapsedTime:       helper.CalcElapsedTime(meta.StartTime),
 		SystemPromptReset: systemPromptReset,
 	})
+
+	// 发送token使用数据到Kafka
+	go func() {
+		// 提取输入文本内容
+		inputText := extractInputText(textRequest)
+
+		kafkaData := &kafka.TokenUsageData{
+			UserId:       meta.UserId,
+			Timestamp:    time.Now().Unix(),
+			ModelName:    textRequest.Model,
+			TokenName:    meta.TokenName,
+			InputTokens:  promptTokens,
+			OutputTokens: completionTokens,
+			InputText:    inputText,
+			OutputText:   "",
+			RequestId:    helper.GetRequestID(ctx),
+			ChannelId:    meta.ChannelId,
+		}
+		err := kafka.SendTokenUsageToKafka(ctx, kafkaData)
+		if err != nil {
+			logger.Errorf(ctx, "发送token使用数据到Kafka失败: %v", err)
+		}
+	}()
+
 	model.UpdateUserUsedQuotaAndRequestCount(meta.UserId, quota)
 	model.UpdateChannelUsedQuota(meta.ChannelId, quota)
+}
+
+// 提取输入文本内容
+func extractInputText(textRequest *relaymodel.GeneralOpenAIRequest) string {
+	if textRequest == nil {
+		return ""
+	}
+
+	var inputTexts []string
+
+	// 从Messages中提取文本
+	for _, message := range textRequest.Messages {
+		if message.Content != nil {
+			if content, ok := message.Content.(string); ok {
+				inputTexts = append(inputTexts, fmt.Sprintf("[%s]: %s", message.Role, content))
+			}
+		}
+	}
+
+	// 如果没有Messages，检查Prompt字段
+	if len(inputTexts) == 0 && textRequest.Prompt != nil {
+		if prompt, ok := textRequest.Prompt.(string); ok {
+			inputTexts = append(inputTexts, prompt)
+		}
+	}
+
+	return strings.Join(inputTexts, "\n")
 }
 
 func getMappedModelName(modelName string, mapping map[string]string) (string, bool) {
