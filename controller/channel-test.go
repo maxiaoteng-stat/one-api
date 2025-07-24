@@ -241,8 +241,11 @@ func parseEmbeddingTestResponse(rawResponse string) (string, error) {
 
 	// 检查是否有嵌入数据
 	data, ok := response["data"].([]interface{})
-	if !ok || len(data) == 0 {
-		return "嵌入向量生成成功，但无数据返回", nil
+	if !ok {
+		return "", errors.New("嵌入向量生成失败，类型断言错误")
+	}
+	if len(data) == 0 {
+		return "", errors.New("嵌入向量生成成功，但无数据返回")
 	}
 
 	// 获取第一个嵌入向量的维度
@@ -286,8 +289,11 @@ func parseRerankTestResponse(rawResponse string) (string, error) {
 
 	// 检查是否有结果数据
 	results, ok := response["results"].([]interface{})
-	if !ok || len(results) == 0 {
-		return "重排序成功，但无结果返回", nil
+	if !ok {
+		return "", errors.New("重排序失败，无返回结果")
+	}
+	if len(results) == 0 {
+		return "", errors.New("重排序成功，但无结果返回")
 	}
 
 	// 获取结果数量
