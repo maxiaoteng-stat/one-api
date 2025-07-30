@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/songquanpeng/one-api/relay/constant/role"
 
 	"github.com/gin-gonic/gin"
+
+	"encoding/json"
 
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
@@ -96,7 +99,7 @@ func preConsumeQuota(ctx context.Context, textRequest *relaymodel.GeneralOpenAIR
 	return preConsumedQuota, nil
 }
 
-func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.Meta, textRequest *relaymodel.GeneralOpenAIRequest, ratio float64, preConsumedQuota int64, modelRatio float64, groupRatio float64, systemPromptReset bool, test bool) {
+func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.Meta, textRequest *relaymodel.GeneralOpenAIRequest, ratio float64, preConsumedQuota int64, modelRatio float64, groupRatio float64, systemPromptReset bool, test bool, responseBody io.ReadCloser) {
 	if usage == nil {
 		logger.Error(ctx, "usage is nil, which is unexpected")
 		return
@@ -142,8 +145,24 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 
 	// 发送token使用数据到Kafka
 	go func() {
+		if !config.KafkaEnabled {
+			return // 如果未启用，静默返回
+		}
+		// 如果模型是embedding模型或rerank模型，不发送token使用数据到Kafka
+		if helper.IsEmbeddingModel(textRequest.Model) || helper.IsRerankModel(textRequest.Model) {
+			return
+		}
+		// if textRequest == nil {
+		// 	return //空文本请求，或者不是语言模型的请求，返回
+		// }
+
 		// 提取输入文本内容
 		inputText := extractInputText(textRequest)
+		respBody, _ := io.ReadAll(responseBody)
+		// 考虑是否需要重置响应体以便后续使用
+
+		// 提取输出文本内容
+		outputText := extractResponseText(respBody)
 
 		kafkaData := &kafka.TokenUsageData{
 			UserId:       meta.UserId,
@@ -153,7 +172,7 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 			InputTokens:  promptTokens,
 			OutputTokens: completionTokens,
 			InputText:    inputText,
-			OutputText:   "",
+			OutputText:   outputText, // 使用提取的输出文本
 			RequestId:    helper.GetRequestID(ctx),
 			ChannelId:    meta.ChannelId,
 		}
@@ -192,6 +211,24 @@ func extractInputText(textRequest *relaymodel.GeneralOpenAIRequest) string {
 	}
 
 	return strings.Join(inputTexts, "\n")
+}
+
+// 提取输出文本内容
+func extractResponseText(responseData []byte) string {
+	if responseData == nil || len(responseData) == 0 {
+		return ""
+	}
+
+	var responseBody ChatCompletionResponse
+	if err := json.Unmarshal(responseData, &responseBody); err != nil {
+		return ""
+	}
+
+	if len(responseBody.Choices) > 0 {
+		return responseBody.Choices[0].Message.Content
+	}
+
+	return ""
 }
 
 func getMappedModelName(modelName string, mapping map[string]string) (string, bool) {
@@ -249,4 +286,12 @@ func setSystemPrompt(ctx context.Context, request *relaymodel.GeneralOpenAIReque
 	}}, request.Messages...)
 	logger.Infof(ctx, "add system prompt")
 	return true
+}
+
+type ChatCompletionResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }

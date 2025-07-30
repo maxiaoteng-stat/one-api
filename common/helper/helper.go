@@ -172,3 +172,38 @@ func Float64PtrMin(p *float64, minValue float64) *float64 {
 	}
 	return p
 }
+
+// IsEmbeddingModel 检查模型名称是否为embedding模型
+func IsEmbeddingModel(modelName string) bool {
+	// 检查模型名称是否包含embedding关键词
+	embeddingKeywords := []string{
+		"embedding", "embed", "text-embedding", "bge-",
+		"data/bge-",
+	}
+
+	modelNameLower := strings.ToLower(modelName)
+	for _, keyword := range embeddingKeywords {
+		if strings.Contains(modelNameLower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsRerankModel 检查模型名称是否为rerank模型
+func IsRerankModel(modelName string) bool {
+	// 检查模型名称是否包含rerank关键词
+	rerankKeywords := []string{
+		"rerank", "re-rank", "reranker", "re-ranker", "cohere-rerank",
+	}
+
+	modelNameLower := strings.ToLower(modelName)
+	for _, keyword := range rerankKeywords {
+		if strings.Contains(modelNameLower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
