@@ -149,7 +149,7 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 			return // 如果未启用，静默返回
 		}
 		// 如果模型是embedding模型或rerank模型，不发送token使用数据到Kafka
-		if helper.IsEmbeddingModel(textRequest.Model) || helper.IsRerankModel(textRequest.Model) {
+		if helper.IsRerankModel(textRequest.Model) || helper.IsEmbeddingModel(textRequest.Model) {
 			return
 		}
 		// if textRequest == nil {
