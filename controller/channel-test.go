@@ -215,20 +215,7 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 
 // 判断是否为嵌入模型
 func isEmbeddingModel(modelName string) bool {
-	// 检查模型名称是否包含embedding关键词
-	embeddingKeywords := []string{
-		"embedding", "embed", "text-embedding", "bge-",
-		"data/bge-",
-	}
-
-	modelNameLower := strings.ToLower(modelName)
-	for _, keyword := range embeddingKeywords {
-		if strings.Contains(modelNameLower, keyword) {
-			return true
-		}
-	}
-
-	return false
+	return helper.IsEmbeddingModel(modelName)
 }
 
 // 解析嵌入模型的测试响应
@@ -264,19 +251,7 @@ func parseEmbeddingTestResponse(rawResponse string) (string, error) {
 
 // 判断是否为rerank模型
 func isRerankModel(modelName string) bool {
-	// 检查模型名称是否包含rerank关键词
-	rerankKeywords := []string{
-		"rerank", "re-rank", "reranker", "re-ranker", "cohere-rerank",
-	}
-
-	modelNameLower := strings.ToLower(modelName)
-	for _, keyword := range rerankKeywords {
-		if strings.Contains(modelNameLower, keyword) {
-			return true
-		}
-	}
-
-	return false
+	return helper.IsRerankModel(modelName)
 }
 
 // 解析rerank模型的测试响应

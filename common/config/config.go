@@ -166,3 +166,10 @@ var EnforceIncludeUsage = env.Bool("ENFORCE_INCLUDE_USAGE", false)
 var TestPrompt = env.String("TEST_PROMPT", "Output only your specific model name with no additional text.")
 
 var BalanceStrategy = env.String("BALANCE_STRATEGY", "random")
+
+// Kafka相关配置
+var KafkaEnabled = env.Bool("KAFKA_ENABLED", false)
+var KafkaBrokers = strings.Split(env.String("KAFKA_BROKERS", "localhost:9092"), ",")
+var KafkaTokenUsageTopic = env.String("KAFKA_TOKEN_USAGE_TOPIC", "token-usage")
+var KafkaUsername = env.String("KAFKA_USERNAME", "")
+var KafkaPassword = env.String("KAFKA_PASSWORD", "")

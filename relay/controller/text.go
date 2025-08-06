@@ -75,6 +75,10 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 		return RelayErrorHandler(resp)
 	}
 
+	// 在调用DoResponse之前，复制响应体
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body = io.NopCloser(bytes.NewBuffer(respBody)) // 重置响应体供DoResponse使用
+
 	// do response
 	usage, respErr := adaptor.DoResponse(c, resp, meta)
 	if respErr != nil {
@@ -84,8 +88,10 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	}
 	//获取request body中的test_flag参数，bool类型
 	test := c.GetHeader("test_flag") == "true"
+	// 再次重置响应体供postConsumeQuota使用
+	resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
 	// post-consume quota
-	go postConsumeQuota(ctx, usage, meta, textRequest, ratio, preConsumedQuota, modelRatio, groupRatio, systemPromptReset, test)
+	go postConsumeQuota(ctx, usage, meta, textRequest, ratio, preConsumedQuota, modelRatio, groupRatio, systemPromptReset, test, resp.Body)
 	return nil
 }
 
