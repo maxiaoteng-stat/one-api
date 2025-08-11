@@ -47,7 +47,7 @@ func InitKafkaProducer() error {
 		kafkaConfig.Net.SASL.User = config.KafkaUsername
 		kafkaConfig.Net.SASL.Password = config.KafkaPassword
 	}
-
+	logger.SysLog("Kafka生产者开始初始化")
 	var err error
 	producer, err = sarama.NewSyncProducer(config.KafkaBrokers, kafkaConfig)
 	if err != nil {
