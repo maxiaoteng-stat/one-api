@@ -200,30 +200,30 @@ func (r *RedisSlidingWindow) CheckAndIncrease(key string, windowSize int64, maxR
 
 	// 使用一个Lua脚本完成检查和计数
 	const checkAndIncreaseScript = `
-local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local windowSize = tonumber(ARGV[2])
-local maxRequests = tonumber(ARGV[3])
-local expireTime = tonumber(ARGV[4])
+	local key = KEYS[1]
+	local now = tonumber(ARGV[1])
+	local windowSize = tonumber(ARGV[2])
+	local maxRequests = tonumber(ARGV[3])
+	local expireTime = tonumber(ARGV[4])
 
--- 清理过期的时间戳
-local windowStart = now - windowSize
-redis.call('ZREMRANGEBYSCORE', key, 0, windowStart)
+	-- 清理过期的时间戳（仅清理超过限流窗口的数据，保留历史数据用于图表显示）
+	local windowStart = now - windowSize
+	redis.call('ZREMRANGEBYSCORE', key, 0, windowStart - 3600000) -- 仅删除1小时前的数据
 
--- 获取当前窗口中的请求数
-local count = redis.call('ZCARD', key)
+	-- 获取当前窗口中的请求数
+	local count = redis.call('ZCOUNT', key, windowStart, now)
 
--- 是否允许请求 + 添加时间戳
-local allowed = 0
-if count < maxRequests then
-    redis.call('ZADD', key, now, now .. ':' .. math.random())
-    redis.call('EXPIRE', key, expireTime)
-    allowed = 1
-end
+	-- 是否允许请求 + 添加时间戳
+	local allowed = 0
+	if count < maxRequests then
+		redis.call('ZADD', key, now, now .. ':' .. math.random())
+		redis.call('EXPIRE', key, expireTime)
+		allowed = 1
+	end
 
--- 返回允许状态和当前计数
-return {allowed, count + (allowed == 1 and 1 or 0)}
-`
+	-- 返回允许状态和当前计数
+	return {allowed, count + (allowed == 1 and 1 or 0)}
+	`
 
 	redisKey := "sliding_window:" + key
 	result, err := RDB.Eval(
@@ -327,17 +327,37 @@ local interval = tonumber(ARGV[3]) -- 单位：毫秒
 local startTime = now - duration
 local result = {}
 
--- 按照指定间隔统计QPS
+-- 获取所有时间戳数据
+local allData = redis.call('ZRANGEBYSCORE', key, startTime, now, 'WITHSCORES')
+local timeMap = {}
+
+-- 将数据按时间间隔分组
+for i = 1, #allData, 2 do
+    local member = allData[i]
+    local score = tonumber(allData[i+1])
+    
+    -- 计算该时间戳属于哪个时间间隔
+    local intervalStart = math.floor((score - startTime) / interval) * interval + startTime
+    
+    -- 初始化该时间间隔的计数
+    if not timeMap[intervalStart] then
+        timeMap[intervalStart] = 0
+    end
+    
+    -- 增加该时间间隔的计数
+    timeMap[intervalStart] = timeMap[intervalStart] + 1
+end
+
+-- 按照指定间隔生成完整的时间序列（包括没有数据的时间点）
 local currentInterval = startTime
 while currentInterval <= now do
-    local nextInterval = currentInterval + interval
-    local count = redis.call('ZCOUNT', key, currentInterval, nextInterval - 1)
+    local count = timeMap[currentInterval] or 0
     
     -- 添加到结果数组: [时间戳1, 计数1, 时间戳2, 计数2, ...]
     table.insert(result, currentInterval)
     table.insert(result, count)
     
-    currentInterval = nextInterval
+    currentInterval = currentInterval + interval
 end
 
 return result
@@ -366,6 +386,8 @@ func (r *RedisSlidingWindow) GetQPSHistory(timeUnit string, count int) ([]map[st
 	// 使用全局限流的key
 	redisKey := "sliding_window:global"
 
+	// 如果Redis中没有足够的历史数据，我们需要从其他地方获取或生成模拟数据
+	// 这里我们先尝试从Redis获取现有数据
 	result, err := RDB.Eval(
 		ctx,
 		getQPSHistoryScript,

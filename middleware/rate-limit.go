@@ -300,7 +300,7 @@ func GlobalRateLimiter() gin.HandlerFunc {
 					qpsKey,
 					windowSize,
 					globalLimit.MaxQPS,
-					60, // 过期时间设为60秒
+					3600, // 过期时间设为3600秒，确保数据保留1小时
 				)
 
 				if err != nil {

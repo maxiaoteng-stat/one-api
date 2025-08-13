@@ -95,9 +95,27 @@ const QPSChart = () => {
     return latestData.value || 0;
   };
   
-  // 格式化提示文本
+  // 添加一个函数来获取请求数单位文本
+  const getRequestRateText = () => {
+    return timeUnit === 'second' ? 
+      t('setting.rate_limit.qps_chart.qps') : // "每秒请求数"
+      "每分钟请求数";
+  };
+
+  // 添加一个函数来获取请求数单位
+  const getRequestRateUnit = () => {
+    return timeUnit === 'second' ? 
+      t('setting.rate_limit.qps_chart.second') : // "秒"
+      t('setting.rate_limit.qps_chart.minute'); // "分钟"
+  };
+
+  // 修改格式化提示文本函数
   const formatTooltip = (value) => {
-    return `${value} ${t('setting.rate_limit.qps_chart.requests_per_second')}`;
+    if (timeUnit === 'second') {
+      return `${value} ${t('setting.rate_limit.qps_chart.requests_per_second')}`;
+    } else {
+      return `${value} 请求/分钟`;
+    }
   };
 
   // 计算Y轴的最大值，确保图表有足够的高度
@@ -106,6 +124,27 @@ const QPSChart = () => {
     
     const maxValue = Math.max(...data.map(item => item.value || 0));
     return Math.max(maxValue + 2, 5); // 至少为5，或者比最大值大2
+  };
+  
+  // 自定义X轴标签，避免遮挡
+  const CustomXAxisTick = (props) => {
+    const { x, y, payload } = props;
+    
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text 
+          x={0} 
+          y={0} 
+          dy={16} 
+          textAnchor="middle" 
+          fill="#999" 
+          fontSize={10}
+          transform="rotate(-35)"
+        >
+          {payload.value}
+        </text>
+      </g>
+    );
   };
   
   return (
@@ -123,7 +162,39 @@ const QPSChart = () => {
           fontSize: '16px',
           color: '#333'
         }}>
-          <span>{t('setting.rate_limit.qps_chart.title')}</span>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <span>{t('setting.rate_limit.qps_chart.title')}</span>
+            {/* 将当前QPS信息移到标题旁边 */}
+            {/* {data.length > 0 && (
+              <div style={{ 
+                marginLeft: '15px',
+                display: 'flex',
+                alignItems: 'center',
+                backgroundColor: '#f8f9fa',
+                padding: '4px 10px',
+                borderRadius: '4px'
+              }}>
+                <span style={{ color: '#6c63FF', fontSize: '13px' }}>
+                  {t('setting.rate_limit.qps_chart.qps')}:
+                </span>
+                <span style={{ 
+                  marginLeft: '5px', 
+                  fontSize: '14px', 
+                  fontWeight: 'bold',
+                  color: '#4318FF'
+                }}>
+                  {getCurrentQPS()}
+                </span>
+                <span style={{ 
+                  marginLeft: '3px', 
+                  fontSize: '12px', 
+                  color: '#888'
+                }}>
+                  / {t('setting.rate_limit.qps_chart.second')}
+                </span>
+              </div>
+            )} */}
+          </div>
           <ButtonGroup>
             <Button 
               size='tiny'
@@ -178,110 +249,92 @@ const QPSChart = () => {
           )}
           
           {data.length > 0 ? (
-            <>
-              <div style={{
-                position: 'absolute',
-                top: '50px',
-                right: '15px',
-                backgroundColor: 'white',
-                padding: '10px 15px',
-                borderRadius: '8px',
-                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.05)',
-                zIndex: 5
-              }}>
-                <div style={{ fontSize: '14px', color: '#888', marginBottom: '5px' }}>
-                  {data[data.length - 1]?.time || ''}
-                </div>
-                <div style={{ 
-                  fontSize: '16px', 
-                  fontWeight: 'bold', 
-                  color: '#4318FF',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <span style={{ color: '#6c63FF' }}>{t('setting.rate_limit.qps_chart.qps')}:</span>
-                  <span style={{ marginLeft: '5px', fontSize: '18px' }}>{getCurrentQPS()}</span>
-                  <span style={{ marginLeft: '5px', fontSize: '14px', color: '#888' }}>
-                    {t('setting.rate_limit.qps_chart.requests_per_second')}
-                  </span>
-                </div>
-              </div>
-              
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={data}
-                  margin={{ top: 20, right: 30, left: 10, bottom: 10 }}
-                >
-                  <defs>
-                    <linearGradient id="colorQPS" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4318FF" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#4318FF" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid 
-                    strokeDasharray="3 3" 
-                    vertical={false} 
-                    stroke="#f0f0f0" 
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={data}
+                margin={{ top: 20, right: 30, left: 10, bottom: 30 }} // 增加底部边距，为倾斜的X轴标签留出空间
+              >
+                <defs>
+                  <linearGradient id="colorQPS" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#4318FF" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#4318FF" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid 
+                  strokeDasharray="3 3" 
+                  vertical={false} 
+                  stroke="#f0f0f0" 
+                />
+                <XAxis 
+                  dataKey="time" 
+                  interval={calculateXAxisInterval()}
+                  tick={<CustomXAxisTick />} // 使用自定义的X轴标签组件
+                  axisLine={{ stroke: '#eee' }}
+                  tickLine={{ stroke: '#eee' }}
+                  padding={{ left: 10, right: 10 }}
+                  height={40} // 增加X轴高度，为倾斜的标签留出空间
+                />
+                <YAxis 
+                  tick={{ fontSize: 11, fill: '#999' }}
+                  axisLine={{ stroke: '#eee' }}
+                  tickLine={{ stroke: '#eee' }}
+                  allowDecimals={false}
+                  domain={[0, calculateYAxisMax()]}
+                  width={30}
+                />
+                <Tooltip 
+                  formatter={formatTooltip}
+                  labelFormatter={(label) => `时间: ${label}`}
+                  content={
+                    ({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div style={{
+                            backgroundColor: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                            padding: '10px 14px'
+                          }}>
+                            <p style={{ color: '#666', marginBottom: '5px' }}>{`时间: ${label}`}</p>
+                            <p style={{ color: '#4318FF' }}>
+                              {`${getRequestRateText()}: ${payload[0].value} 请求/${getRequestRateUnit()}`}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }
+                  }
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="value" 
+                  name={t('setting.rate_limit.qps_chart.qps')}
+                  stroke="#4318FF" 
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 6, stroke: '#4318FF', strokeWidth: 1, fill: 'white' }}
+                  fill="url(#colorQPS)"
+                  connectNulls={false}
+                  isAnimationActive={false} // 关闭动画，避免切换时的过渡效果
+                />
+                {getCurrentTimeIndex() > 0 && (
+                  <ReferenceLine 
+                    x={data[getCurrentTimeIndex()]?.time} 
+                    stroke="#ff4757" 
+                    strokeWidth={1.5}
+                    strokeDasharray="5 5"
+                    label={{ 
+                      value: '当前', 
+                      position: 'top', 
+                      fill: '#ff4757',
+                      fontSize: 11
+                    }} 
                   />
-                  <XAxis 
-                    dataKey="time" 
-                    interval={calculateXAxisInterval()}
-                    tick={{ fontSize: 11, fill: '#999' }}
-                    axisLine={{ stroke: '#eee' }}
-                    tickLine={{ stroke: '#eee' }}
-                    padding={{ left: 10, right: 10 }}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 11, fill: '#999' }}
-                    axisLine={{ stroke: '#eee' }}
-                    tickLine={{ stroke: '#eee' }}
-                    allowDecimals={false}
-                    domain={[0, calculateYAxisMax()]}
-                    width={30}
-                  />
-                  <Tooltip 
-                    formatter={formatTooltip}
-                    labelFormatter={(label) => `时间: ${label}`}
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-                      padding: '10px 14px'
-                    }}
-                    itemStyle={{ color: '#4318FF' }}
-                    labelStyle={{ color: '#666', marginBottom: '5px' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="value" 
-                    name={t('setting.rate_limit.qps_chart.qps')}
-                    stroke="#4318FF" 
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 6, stroke: '#4318FF', strokeWidth: 1, fill: 'white' }}
-                    fill="url(#colorQPS)"
-                    // 添加连接线条件，确保只有相同时间单位的数据点才连接
-                    connectNulls={false}
-                    isAnimationActive={false} // 关闭动画，避免切换时的过渡效果
-                  />
-                  {getCurrentTimeIndex() > 0 && (
-                    <ReferenceLine 
-                      x={data[getCurrentTimeIndex()]?.time} 
-                      stroke="#ff4757" 
-                      strokeWidth={1.5}
-                      strokeDasharray="5 5"
-                      label={{ 
-                        value: '当前', 
-                        position: 'top', 
-                        fill: '#ff4757',
-                        fontSize: 11
-                      }} 
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </>
+                )}
+              </LineChart>
+            </ResponsiveContainer>
           ) : (
             <div style={{ 
               height: '100%', 
@@ -302,4 +355,4 @@ const QPSChart = () => {
   );
 };
 
-export default QPSChart; 
+export default QPSChart;
