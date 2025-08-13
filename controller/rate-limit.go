@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/model"
 )
 
@@ -199,5 +200,38 @@ func UpdateTokenRateLimit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "更新成功",
+	})
+}
+
+// GetQPSData 获取QPS历史数据
+func GetQPSData(c *gin.Context) {
+	if !common.RedisEnabled {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Redis未启用",
+		})
+		return
+	}
+
+	timeUnit := c.Query("unit")
+	if timeUnit != "second" && timeUnit != "minute" {
+		timeUnit = "second" // 默认为秒
+	}
+
+	// 获取数据点数量
+	count := 60 // 默认60个数据点
+
+	data, err := common.RedisSlidingWindowLimiter.GetQPSHistory(timeUnit, count)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
 	})
 }

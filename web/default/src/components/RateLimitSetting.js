@@ -7,6 +7,7 @@ import {
   Header
 } from 'semantic-ui-react';
 import { API, showError, showSuccess } from '../helpers';
+import QPSChart from './QPSChart';
 
 const RateLimitSetting = () => {
   const { t } = useTranslation();
@@ -83,95 +84,100 @@ const RateLimitSetting = () => {
   }
 
   return (
-    <Segment loading={loading}>
-      <Header as='h3'>{t('setting.rate_limit.title')}</Header>
-      <Form>
-        <Form.Field>
-          <label>{t('setting.rate_limit.enabled')}</label>
-          <Form.Checkbox
-            toggle
-            name='enabled'
-            checked={inputs.enabled}
-            onChange={(e, { name, checked }) => handleInputChange(e, { name, value: checked })}
-          />
-          <small>{t('setting.rate_limit.enabled_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.max_qps')}</label>
-          <Form.Input
-            name='max_qps'
-            type='number'
-            min={0}
-            placeholder={t('setting.rate_limit.max_qps_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.max_qps}
-          />
-          <small>{t('setting.rate_limit.max_qps_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.daily_quota')}</label>
-          <Form.Input
-            name='daily_quota'
-            type='number'
-            min={0}
-            placeholder={t('setting.rate_limit.daily_quota_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.daily_quota}
-          />
-          <small>{t('setting.rate_limit.daily_quota_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.queue_capacity')}</label>
-          <Form.Input
-            name='queue_capacity'
-            type='number'
-            min={0}
-            placeholder={t('setting.rate_limit.queue_capacity_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.queue_capacity}
-          />
-          <small>{t('setting.rate_limit.queue_capacity_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.queue_timeout')}</label>
-          <Form.Input
-            name='queue_timeout'
-            type='number'
-            min={1}
-            placeholder={t('setting.rate_limit.queue_timeout_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.queue_timeout}
-          />
-          <small>{t('setting.rate_limit.queue_timeout_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.warning_threshold')}</label>
-          <Form.Input
-            name='warning_threshold'
-            type='number'
-            min={0}
-            max={100}
-            placeholder={t('setting.rate_limit.warning_threshold_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.warning_threshold}
-          />
-          <small>{t('setting.rate_limit.warning_threshold_hint')}</small>
-        </Form.Field>
-        <Form.Field>
-          <label>{t('setting.rate_limit.dingtalk_webhook')}</label>
-          <Form.Input
-            name='dingtalk_webhook'
-            placeholder={t('setting.rate_limit.dingtalk_webhook_placeholder')}
-            onChange={handleInputChange}
-            value={inputs.dingtalk_webhook}
-          />
-          <small>{t('setting.rate_limit.dingtalk_webhook_hint')}</small>
-        </Form.Field>
-        <Button type='button' onClick={handleSubmit} loading={saving} primary>
-          {t('setting.rate_limit.save')}
-        </Button>
-      </Form>
-    </Segment>
+    <>
+      {/* 添加QPS图表在限流设置上方 */}
+      <QPSChart />
+      
+      <Segment loading={loading}>
+        <Header as='h3'>{t('setting.rate_limit.title')}</Header>
+        <Form>
+          <Form.Field>
+            <label>{t('setting.rate_limit.enabled')}</label>
+            <Form.Checkbox
+              toggle
+              name='enabled'
+              checked={inputs.enabled}
+              onChange={(e, { name, checked }) => handleInputChange(e, { name, value: checked })}
+            />
+            <small>{t('setting.rate_limit.enabled_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.max_qps')}</label>
+            <Form.Input
+              name='max_qps'
+              type='number'
+              min={0}
+              placeholder={t('setting.rate_limit.max_qps_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.max_qps}
+            />
+            <small>{t('setting.rate_limit.max_qps_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.daily_quota')}</label>
+            <Form.Input
+              name='daily_quota'
+              type='number'
+              min={0}
+              placeholder={t('setting.rate_limit.daily_quota_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.daily_quota}
+            />
+            <small>{t('setting.rate_limit.daily_quota_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.queue_capacity')}</label>
+            <Form.Input
+              name='queue_capacity'
+              type='number'
+              min={0}
+              placeholder={t('setting.rate_limit.queue_capacity_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.queue_capacity}
+            />
+            <small>{t('setting.rate_limit.queue_capacity_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.queue_timeout')}</label>
+            <Form.Input
+              name='queue_timeout'
+              type='number'
+              min={1}
+              placeholder={t('setting.rate_limit.queue_timeout_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.queue_timeout}
+            />
+            <small>{t('setting.rate_limit.queue_timeout_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.warning_threshold')}</label>
+            <Form.Input
+              name='warning_threshold'
+              type='number'
+              min={0}
+              max={100}
+              placeholder={t('setting.rate_limit.warning_threshold_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.warning_threshold}
+            />
+            <small>{t('setting.rate_limit.warning_threshold_hint')}</small>
+          </Form.Field>
+          <Form.Field>
+            <label>{t('setting.rate_limit.dingtalk_webhook')}</label>
+            <Form.Input
+              name='dingtalk_webhook'
+              placeholder={t('setting.rate_limit.dingtalk_webhook_placeholder')}
+              onChange={handleInputChange}
+              value={inputs.dingtalk_webhook}
+            />
+            <small>{t('setting.rate_limit.dingtalk_webhook_hint')}</small>
+          </Form.Field>
+          <Button type='button' onClick={handleSubmit} loading={saving} primary>
+            {t('setting.rate_limit.save')}
+          </Button>
+        </Form>
+      </Segment>
+    </>
   );
 };
 

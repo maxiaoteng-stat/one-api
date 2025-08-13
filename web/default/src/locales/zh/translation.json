@@ -842,7 +842,15 @@
       "update_success": "更新成功",
       "update_failed": "更新失败",
       "enabled": "启用限流",
-      "enabled_hint": "设置是否启用全局限流功能"
+      "enabled_hint": "设置是否启用全局限流功能",
+      "qps_chart": {
+        "title": "实时QPS监控",
+        "qps": "每秒请求数",
+        "second": "秒",
+        "minute": "分钟",
+        "requests_per_second": "请求/秒"
+      },
+      "no_data": "暂无数据"
     }
   },
   "about": {

@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -314,4 +315,95 @@ func IncrAndGetQPS(key string, expireSeconds int) (int64, error) {
 
 	// 使用Redis滑动窗口
 	return RedisSlidingWindowLimiter.GetQPS(key, expireSeconds)
+}
+
+// 获取QPS历史数据的Lua脚本
+const getQPSHistoryScript = `
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local duration = tonumber(ARGV[2]) -- 单位：毫秒
+local interval = tonumber(ARGV[3]) -- 单位：毫秒
+
+local startTime = now - duration
+local result = {}
+
+-- 按照指定间隔统计QPS
+local currentInterval = startTime
+while currentInterval <= now do
+    local nextInterval = currentInterval + interval
+    local count = redis.call('ZCOUNT', key, currentInterval, nextInterval - 1)
+    
+    -- 添加到结果数组: [时间戳1, 计数1, 时间戳2, 计数2, ...]
+    table.insert(result, currentInterval)
+    table.insert(result, count)
+    
+    currentInterval = nextInterval
+end
+
+return result
+`
+
+// GetQPSHistory 获取指定时间范围内的QPS历史数据
+// timeUnit: 时间单位，"second" 或 "minute"
+// count: 获取多少个时间单位的数据
+func (r *RedisSlidingWindow) GetQPSHistory(timeUnit string, count int) ([]map[string]interface{}, error) {
+	if !RedisEnabled {
+		return nil, fmt.Errorf("redis not enabled")
+	}
+
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+
+	var duration, interval int64
+	if timeUnit == "second" {
+		duration = int64(count) * 1000 // count秒
+		interval = 1000                // 1秒间隔
+	} else {
+		duration = int64(count) * 60 * 1000 // count分钟
+		interval = 60 * 1000                // 1分钟间隔
+	}
+
+	// 使用全局限流的key
+	redisKey := "sliding_window:global"
+
+	result, err := RDB.Eval(
+		ctx,
+		getQPSHistoryScript,
+		[]string{redisKey},
+		now,
+		duration,
+		interval,
+	).Result()
+
+	if err != nil {
+		logger.SysError("执行Redis获取QPS历史数据脚本失败: " + err.Error())
+		return nil, err
+	}
+
+	// 处理结果
+	records := result.([]interface{})
+	data := make([]map[string]interface{}, 0, len(records)/2)
+
+	// 解析时间戳和计数
+	for i := 0; i < len(records); i += 2 {
+		ts, _ := strconv.ParseInt(fmt.Sprint(records[i]), 10, 64)
+		count, _ := strconv.Atoi(fmt.Sprint(records[i+1]))
+
+		// 格式化时间
+		t := time.Unix(0, ts*int64(time.Millisecond))
+		var formattedTime string
+		if timeUnit == "second" {
+			formattedTime = fmt.Sprintf("%02d:%02d:%02d", t.Hour(), t.Minute(), t.Second())
+		} else {
+			formattedTime = fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute())
+		}
+
+		data = append(data, map[string]interface{}{
+			"timestamp": ts,
+			"time":      formattedTime,
+			"value":     count,
+		})
+	}
+
+	return data, nil
 }

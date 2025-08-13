@@ -138,6 +138,7 @@ func SetApiRouter(router *gin.Engine) {
 			adminRoute.PUT("/rate-limit/global", controller.UpdateGlobalRateLimit)
 			adminRoute.GET("/rate-limit/token/:id", controller.GetTokenRateLimit)
 			adminRoute.PUT("/rate-limit/token/:id", controller.UpdateTokenRateLimit)
+			adminRoute.GET("/rate-limit/qps", controller.GetQPSData)
 		}
 	}
 }
