@@ -19,6 +19,7 @@ const QPSChart = () => {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState([]);
   const [timeUnit, setTimeUnit] = useState('second'); // 'second' 或 'minute'
+  const [lastUnitChange, setLastUnitChange] = useState(Date.now()); // 记录最后一次单位切换的时间
   
   // 获取QPS数据
   const fetchQPSData = async () => {
@@ -28,7 +29,18 @@ const QPSChart = () => {
       const { success, message, data } = res.data;
       
       if (success && data) {
-        setData(data);
+        // 处理数据，为每个数据点添加一个时间戳标识
+        const processedData = data.map(item => ({
+          ...item,
+          unitTimestamp: lastUnitChange // 添加单位切换时间戳标识
+        }));
+        
+        // 过滤掉旧的时间单位数据，只保留当前时间单位的数据
+        const filteredData = data.length > 0 
+          ? [...data.filter(item => item.unitTimestamp === lastUnitChange), ...processedData]
+          : processedData;
+        
+        setData(filteredData);
       } else {
         showError(message || t('general.error'));
       }
@@ -48,11 +60,15 @@ const QPSChart = () => {
     }, timeUnit === 'second' ? 1000 : 10000); // 秒级数据每秒刷新，分钟级数据每10秒刷新
     
     return () => clearInterval(intervalId);
-  }, [timeUnit]);
+  }, [timeUnit, lastUnitChange]);
   
   // 切换时间单位
   const handleUnitChange = (unit) => {
-    setTimeUnit(unit);
+    if (unit !== timeUnit) {
+      setTimeUnit(unit);
+      setData([]); // 清空数据，避免不同时间单位的数据连接在一起
+      setLastUnitChange(Date.now()); // 更新单位切换时间戳
+    }
   };
   
   // 计算图表的X轴间隔
@@ -165,7 +181,7 @@ const QPSChart = () => {
             <>
               <div style={{
                 position: 'absolute',
-                top: '50px', // 将top从10px改为50px，往下移动
+                top: '50px',
                 right: '15px',
                 backgroundColor: 'white',
                 padding: '10px 15px',
@@ -245,6 +261,9 @@ const QPSChart = () => {
                     dot={false}
                     activeDot={{ r: 6, stroke: '#4318FF', strokeWidth: 1, fill: 'white' }}
                     fill="url(#colorQPS)"
+                    // 添加连接线条件，确保只有相同时间单位的数据点才连接
+                    connectNulls={false}
+                    isAnimationActive={false} // 关闭动画，避免切换时的过渡效果
                   />
                   {getCurrentTimeIndex() > 0 && (
                     <ReferenceLine 
