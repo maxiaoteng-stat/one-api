@@ -95,27 +95,9 @@ const QPSChart = () => {
     return latestData.value || 0;
   };
   
-  // 添加一个函数来获取请求数单位文本
-  const getRequestRateText = () => {
-    return timeUnit === 'second' ? 
-      t('setting.rate_limit.qps_chart.qps') : // "每秒请求数"
-      "每分钟请求数";
-  };
-
-  // 添加一个函数来获取请求数单位
-  const getRequestRateUnit = () => {
-    return timeUnit === 'second' ? 
-      t('setting.rate_limit.qps_chart.second') : // "秒"
-      t('setting.rate_limit.qps_chart.minute'); // "分钟"
-  };
-
-  // 修改格式化提示文本函数
+  // 格式化提示文本
   const formatTooltip = (value) => {
-    if (timeUnit === 'second') {
-      return `${value} ${t('setting.rate_limit.qps_chart.requests_per_second')}`;
-    } else {
-      return `${value} 请求/分钟`;
-    }
+    return `${value} ${t('setting.rate_limit.qps_chart.requests_per_second')}`;
   };
 
   // 计算Y轴的最大值，确保图表有足够的高度
@@ -145,6 +127,35 @@ const QPSChart = () => {
         </text>
       </g>
     );
+  };
+
+  // 在QPSChart组件中添加一个函数，根据当前时间单位返回正确的请求数文本
+  const getRequestRateText = () => {
+    return timeUnit === 'second' ? 
+      t('setting.rate_limit.qps_chart.qps_second') : // "每秒请求数"
+      t('setting.rate_limit.qps_chart.qps_minute');  // "每分钟请求数"
+  };
+
+  // 在Tooltip内容中使用这个函数
+  // 修改Tooltip组件的内容
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{
+          backgroundColor: 'white',
+          border: 'none',
+          borderRadius: '8px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+          padding: '10px 14px'
+        }}>
+          <p style={{ color: '#666', marginBottom: '5px' }}>{`时间: ${label}`}</p>
+          <p style={{ color: '#4318FF' }}>
+            {`${getRequestRateText()}: ${payload[0].value} 请求/${timeUnit === 'second' ? '秒' : '分钟'}`}
+          </p>
+        </div>
+      );
+    }
+    return null;
   };
   
   return (
@@ -285,27 +296,16 @@ const QPSChart = () => {
                 <Tooltip 
                   formatter={formatTooltip}
                   labelFormatter={(label) => `时间: ${label}`}
-                  content={
-                    ({ active, payload, label }) => {
-                      if (active && payload && payload.length) {
-                        return (
-                          <div style={{
-                            backgroundColor: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-                            padding: '10px 14px'
-                          }}>
-                            <p style={{ color: '#666', marginBottom: '5px' }}>{`时间: ${label}`}</p>
-                            <p style={{ color: '#4318FF' }}>
-                              {`${getRequestRateText()}: ${payload[0].value} 请求/${getRequestRateUnit()}`}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }
-                  }
+                  contentStyle={{
+                    backgroundColor: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                    padding: '10px 14px'
+                  }}
+                  itemStyle={{ color: '#4318FF' }}
+                  labelStyle={{ color: '#666', marginBottom: '5px' }}
+                  content={<CustomTooltip />} // 使用自定义Tooltip
                 />
                 <Line 
                   type="monotone" 
