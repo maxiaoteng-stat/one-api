@@ -8,7 +8,8 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend
+  Legend,
+  ReferenceLine
 } from 'recharts';
 import { Card, Segment, Button, ButtonGroup } from 'semantic-ui-react';
 import { API, showError } from '../helpers';
@@ -23,7 +24,6 @@ const QPSChart = () => {
   const fetchQPSData = async () => {
     setLoading(true);
     try {
-      // 修改API路径从/api/dashboard/qps到/api/rate-limit/qps
       const res = await API.get(`/api/rate-limit/qps?unit=${timeUnit}`);
       const { success, message, data } = res.data;
       
@@ -64,85 +64,220 @@ const QPSChart = () => {
     }
   };
   
+  // 计算当前时间点
+  const getCurrentTimeIndex = () => {
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}${timeUnit === 'second' ? `:${String(now.getSeconds()).padStart(2, '0')}` : ''}`;
+    
+    return data.findIndex(item => item.time === currentTime);
+  };
+  
+  // 获取最新的QPS值
+  const getCurrentQPS = () => {
+    if (data.length === 0) return 0;
+    const latestData = data[data.length - 1];
+    return latestData.value || 0;
+  };
+  
   // 格式化提示文本
   const formatTooltip = (value) => {
     return `${value} ${t('setting.rate_limit.qps_chart.requests_per_second')}`;
   };
+
+  // 计算Y轴的最大值，确保图表有足够的高度
+  const calculateYAxisMax = () => {
+    if (data.length === 0) return 5;
+    
+    const maxValue = Math.max(...data.map(item => item.value || 0));
+    return Math.max(maxValue + 2, 5); // 至少为5，或者比最大值大2
+  };
   
   return (
-    <Card fluid>
+    <Card fluid style={{
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
+      borderRadius: '10px',
+      border: 'none'
+    }}>
       <Card.Content>
-        <Card.Header>
-          {t('setting.rate_limit.qps_chart.title')}
-          <ButtonGroup size='mini' floated='right'>
+        <Card.Header style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '15px',
+          fontSize: '16px',
+          color: '#333'
+        }}>
+          <span>{t('setting.rate_limit.qps_chart.title')}</span>
+          <ButtonGroup>
             <Button 
-              primary={timeUnit === 'second'} 
+              size='tiny'
+              style={{
+                backgroundColor: timeUnit === 'second' ? '#2185d0' : '#f8f9fa',
+                color: timeUnit === 'second' ? 'white' : '#666',
+                borderRadius: '4px 0 0 4px',
+                boxShadow: 'none',
+                fontWeight: 'normal'
+              }}
               onClick={() => handleUnitChange('second')}
             >
               {t('setting.rate_limit.qps_chart.second')}
             </Button>
             <Button 
-              primary={timeUnit === 'minute'} 
+              size='tiny'
+              style={{
+                backgroundColor: timeUnit === 'minute' ? '#2185d0' : '#f8f9fa',
+                color: timeUnit === 'minute' ? 'white' : '#666',
+                borderRadius: '0 4px 4px 0',
+                boxShadow: 'none',
+                fontWeight: 'normal'
+              }}
               onClick={() => handleUnitChange('minute')}
             >
               {t('setting.rate_limit.qps_chart.minute')}
             </Button>
           </ButtonGroup>
         </Card.Header>
-        <Card.Description>
-          <Segment loading={loading} style={{ height: '300px', padding: '1em 0' }}>
-            {data.length > 0 ? (
+        
+        <div style={{ 
+          position: 'relative',
+          height: '320px',
+          padding: '0'
+        }}>
+          {loading && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+              zIndex: 10,
+              borderRadius: '8px'
+            }}>
+              <div className="ui active loader"></div>
+            </div>
+          )}
+          
+          {data.length > 0 ? (
+            <>
+              <div style={{
+                position: 'absolute',
+                top: '50px', // 将top从10px改为50px，往下移动
+                right: '15px',
+                backgroundColor: 'white',
+                padding: '10px 15px',
+                borderRadius: '8px',
+                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.05)',
+                zIndex: 5
+              }}>
+                <div style={{ fontSize: '14px', color: '#888', marginBottom: '5px' }}>
+                  {data[data.length - 1]?.time || ''}
+                </div>
+                <div style={{ 
+                  fontSize: '16px', 
+                  fontWeight: 'bold', 
+                  color: '#4318FF',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <span style={{ color: '#6c63FF' }}>{t('setting.rate_limit.qps_chart.qps')}:</span>
+                  <span style={{ marginLeft: '5px', fontSize: '18px' }}>{getCurrentQPS()}</span>
+                  <span style={{ marginLeft: '5px', fontSize: '14px', color: '#888' }}>
+                    {t('setting.rate_limit.qps_chart.requests_per_second')}
+                  </span>
+                </div>
+              </div>
+              
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
                   data={data}
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                  margin={{ top: 20, right: 30, left: 10, bottom: 10 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                  <defs>
+                    <linearGradient id="colorQPS" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4318FF" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#4318FF" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid 
+                    strokeDasharray="3 3" 
+                    vertical={false} 
+                    stroke="#f0f0f0" 
+                  />
                   <XAxis 
                     dataKey="time" 
                     interval={calculateXAxisInterval()}
-                    tick={{ fontSize: 12, fill: '#666' }}
+                    tick={{ fontSize: 11, fill: '#999' }}
+                    axisLine={{ stroke: '#eee' }}
+                    tickLine={{ stroke: '#eee' }}
+                    padding={{ left: 10, right: 10 }}
                   />
                   <YAxis 
-                    tick={{ fontSize: 12, fill: '#666' }}
+                    tick={{ fontSize: 11, fill: '#999' }}
+                    axisLine={{ stroke: '#eee' }}
+                    tickLine={{ stroke: '#eee' }}
                     allowDecimals={false}
-                    minTickGap={1}
+                    domain={[0, calculateYAxisMax()]}
+                    width={30}
                   />
                   <Tooltip 
                     formatter={formatTooltip}
-                    labelFormatter={(label) => `${label}`}
+                    labelFormatter={(label) => `时间: ${label}`}
                     contentStyle={{
-                      backgroundColor: '#fff',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      padding: '10px'
+                      backgroundColor: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                      padding: '10px 14px'
                     }}
+                    itemStyle={{ color: '#4318FF' }}
+                    labelStyle={{ color: '#666', marginBottom: '5px' }}
                   />
-                  <Legend />
                   <Line 
                     type="monotone" 
                     dataKey="value" 
                     name={t('setting.rate_limit.qps_chart.qps')}
                     stroke="#4318FF" 
-                    strokeWidth={2}
+                    strokeWidth={2.5}
                     dot={false}
-                    activeDot={{ r: 4 }}
+                    activeDot={{ r: 6, stroke: '#4318FF', strokeWidth: 1, fill: 'white' }}
+                    fill="url(#colorQPS)"
                   />
+                  {getCurrentTimeIndex() > 0 && (
+                    <ReferenceLine 
+                      x={data[getCurrentTimeIndex()]?.time} 
+                      stroke="#ff4757" 
+                      strokeWidth={1.5}
+                      strokeDasharray="5 5"
+                      label={{ 
+                        value: '当前', 
+                        position: 'top', 
+                        fill: '#ff4757',
+                        fontSize: 11
+                      }} 
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
-            ) : (
-              <div style={{ 
-                height: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                color: '#999'
-              }}>
-                {t('setting.rate_limit.no_data')}
-              </div>
-            )}
-          </Segment>
-        </Card.Description>
+            </>
+          ) : (
+            <div style={{ 
+              height: '100%', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: '#999',
+              backgroundColor: '#f9f9f9',
+              borderRadius: '8px',
+              fontSize: '15px'
+            }}>
+              {t('setting.rate_limit.no_data')}
+            </div>
+          )}
+        </div>
       </Card.Content>
     </Card>
   );
