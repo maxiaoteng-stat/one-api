@@ -35,6 +35,7 @@ type Meta struct {
 	PromptTokens       int // only for DoResponse
 	ForcedSystemPrompt string
 	StartTime          time.Time
+	StreamResponseText string // 新增字段，用于存储响应文本
 }
 
 func GetByContext(c *gin.Context) *Meta {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -99,7 +98,7 @@ func preConsumeQuota(ctx context.Context, textRequest *relaymodel.GeneralOpenAIR
 	return preConsumedQuota, nil
 }
 
-func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.Meta, textRequest *relaymodel.GeneralOpenAIRequest, ratio float64, preConsumedQuota int64, modelRatio float64, groupRatio float64, systemPromptReset bool, test bool, responseBody io.ReadCloser) {
+func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.Meta, textRequest *relaymodel.GeneralOpenAIRequest, ratio float64, preConsumedQuota int64, modelRatio float64, groupRatio float64, systemPromptReset bool, test bool, responseBody []byte) {
 	if usage == nil {
 		logger.Error(ctx, "usage is nil, which is unexpected")
 		return
@@ -158,11 +157,12 @@ func postConsumeQuota(ctx context.Context, usage *relaymodel.Usage, meta *meta.M
 
 		// 提取输入文本内容
 		inputText := extractInputText(textRequest)
-		respBody, _ := io.ReadAll(responseBody)
-		// 考虑是否需要重置响应体以便后续使用
-
-		// 提取输出文本内容
-		outputText := extractResponseText(respBody)
+		var outputText string
+		if meta.IsStream {
+			outputText = meta.StreamResponseText
+		} else {
+			outputText = extractResponseText(responseBody)
+		}
 
 		kafkaData := &kafka.TokenUsageData{
 			UserId:       meta.UserId,
