@@ -61,24 +61,57 @@ const EditToken = () => {
     setInputs({ ...inputs, unlimited_quota: !unlimited_quota });
   };
 
+  // 修改loadToken函数，确保正确处理模型列表
   const loadToken = async () => {
     try {
       let res = await API.get(`/api/token/${tokenId}`);
       const { success, message, data } = res.data || {};
       if (success && data) {
+        
         if (data.expired_time !== -1) {
           data.expired_time = timestamp2string(data.expired_time);
         }
+        
+        // 处理模型列表
+        let tokenModels = [];
         if (data.models === '') {
           data.models = [];
         } else {
-          data.models = data.models.split(',');
+          tokenModels = data.models.split(',');
         }
-        setInputs(data);
+        
+        // 创建模型选项
+        const tokenModelOptions = tokenModels.map(model => ({
+          key: model,
+          text: model,
+          value: model
+        }));
+        
+        // 直接设置为模型选项，确保显示所有令牌中的模型
+        setModelOptions(prev => {
+          // 合并现有选项和令牌中的选项，避免重复
+          const mergedOptions = [...prev];
+          
+          tokenModelOptions.forEach(option => {
+            if (!mergedOptions.some(opt => opt.value === option.value)) {
+              mergedOptions.push(option);
+            }
+          });
+          
+          console.log("合并后的模型选项:", mergedOptions); // 添加调试信息
+          return mergedOptions;
+        });
+        
+        // 更新输入状态
+        setInputs({
+          ...data,
+          models: tokenModels
+        });
       } else {
         showError(message || 'Failed to load token');
       }
     } catch (error) {
+      console.error("加载令牌出错:", error);
       showError(error.message || 'Network error');
     }
     setLoading(false);
@@ -105,16 +138,29 @@ const EditToken = () => {
     }
   };
 
+  // 修改useEffect，确保正确的加载顺序
   useEffect(() => {
-    if (isEdit) {
-      loadToken().catch((error) => {
-        showError(error.message || 'Failed to load token');
-        setLoading(false);
+    const init = async () => {
+      setLoading(true);
+      
+      // 先加载可用模型
+      await loadAvailableModels().catch(error => {
+        console.error("加载可用模型失败:", error);
+        showError(error.message || 'Failed to load models');
       });
-    }
-    loadAvailableModels().catch((error) => {
-      showError(error.message || 'Failed to load models');
-    });
+      
+      // 如果是编辑模式，加载令牌
+      if (isEdit) {
+        await loadToken().catch(error => {
+          console.error("加载令牌失败:", error);
+          showError(error.message || 'Failed to load token');
+        });
+      } else {
+        setLoading(false);
+      }
+    };
+    
+    init();
   }, []);
 
   const submit = async () => {
