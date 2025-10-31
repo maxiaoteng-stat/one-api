@@ -3,9 +3,9 @@ package model
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
-
-	"gorm.io/gorm"
+	"time"
 
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
@@ -44,7 +44,16 @@ const (
 func recordLogHelper(ctx context.Context, log *Log) {
 	requestId := helper.GetRequestID(ctx)
 	log.RequestId = requestId
-	err := LOG_DB.Create(log).Error
+
+	var err error
+	if common.UsingMySQL {
+		// MySQL 使用分表
+		tableName := GetCurrentTableName()
+		err = LOG_DB.Table(tableName).Create(log).Error
+	} else {
+		err = LOG_DB.Create(log).Error
+	}
+
 	if err != nil {
 		logger.Error(ctx, "failed to record log: "+err.Error())
 		return
@@ -103,126 +112,312 @@ func RecordTestLog(ctx context.Context, log *Log) {
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int) (logs []*Log, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB
-	} else {
-		tx = LOG_DB.Where("type = ?", logType)
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
+	// 构建WHERE条件
+	var conditions []string
+	var baseArgs []interface{}
+
+	if logType != LogTypeUnknown {
+		conditions = append(conditions, "type = ?")
+		baseArgs = append(baseArgs, logType)
 	}
 	if modelName != "" {
-		tx = tx.Where("model_name = ?", modelName)
+		conditions = append(conditions, "model_name = ?")
+		baseArgs = append(baseArgs, modelName)
 	}
 	if username != "" {
-		tx = tx.Where("username = ?", username)
+		conditions = append(conditions, "username = ?")
+		baseArgs = append(baseArgs, username)
 	}
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		conditions = append(conditions, "token_name = ?")
+		baseArgs = append(baseArgs, tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		conditions = append(conditions, "created_at >= ?")
+		baseArgs = append(baseArgs, startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		conditions = append(conditions, "created_at <= ?")
+		baseArgs = append(baseArgs, endTimestamp)
 	}
 	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
+		conditions = append(conditions, "channel_id = ?")
+		baseArgs = append(baseArgs, channel)
 	}
-	err = tx.Order("id desc").Limit(num).Offset(startIdx).Find(&logs).Error
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// 单表优化：直接查询，避免 UNION ALL
+	if len(tables) == 1 {
+		sql := fmt.Sprintf("SELECT * FROM %s%s ORDER BY id DESC LIMIT ? OFFSET ?", tables[0], whereClause)
+		args := append(baseArgs, num, startIdx)
+		err = LOG_DB.Raw(sql, args...).Scan(&logs).Error
+		return logs, err
+	}
+
+	// 多表优化：在子查询中先排序和限制，减少需要合并的数据量
+	// 每个子查询取 startIdx + num 条，确保合并后能得到足够的数据
+	subQueryLimit := startIdx + num
+	sqlTemplate := fmt.Sprintf("(SELECT * FROM {TABLE}%s ORDER BY id DESC LIMIT %d)", whereClause, subQueryLimit)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, baseArgs...)
+	}
+	args = append(args, num, startIdx)
+
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ? OFFSET ?", unionSQL)
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int) (logs []*Log, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("user_id = ?", userId)
-	} else {
-		tx = LOG_DB.Where("user_id = ? and type = ?", userId, logType)
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
+	// 构建WHERE条件
+	var conditions []string
+	var baseArgs []interface{}
+
+	conditions = append(conditions, "user_id = ?")
+	baseArgs = append(baseArgs, userId)
+
+	if logType != LogTypeUnknown {
+		conditions = append(conditions, "type = ?")
+		baseArgs = append(baseArgs, logType)
 	}
 	if modelName != "" {
-		tx = tx.Where("model_name = ?", modelName)
+		conditions = append(conditions, "model_name = ?")
+		baseArgs = append(baseArgs, modelName)
 	}
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		conditions = append(conditions, "token_name = ?")
+		baseArgs = append(baseArgs, tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		conditions = append(conditions, "created_at >= ?")
+		baseArgs = append(baseArgs, startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		conditions = append(conditions, "created_at <= ?")
+		baseArgs = append(baseArgs, endTimestamp)
 	}
-	err = tx.Order("id desc").Limit(num).Offset(startIdx).Omit("id").Find(&logs).Error
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 单表优化：直接查询
+	if len(tables) == 1 {
+		sql := fmt.Sprintf("SELECT * FROM %s%s ORDER BY id DESC LIMIT ? OFFSET ?", tables[0], whereClause)
+		args := append(baseArgs, num, startIdx)
+		err = LOG_DB.Raw(sql, args...).Scan(&logs).Error
+		return logs, err
+	}
+
+	// 多表优化：在子查询中先排序和限制
+	subQueryLimit := startIdx + num
+	sqlTemplate := fmt.Sprintf("(SELECT * FROM {TABLE}%s ORDER BY id DESC LIMIT %d)", whereClause, subQueryLimit)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, baseArgs...)
+	}
+	args = append(args, num, startIdx)
+
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ? OFFSET ?", unionSQL)
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
 
 func SearchAllLogs(keyword string) (logs []*Log, err error) {
-	err = LOG_DB.Where("type = ? or content LIKE ?", keyword, keyword+"%").Order("id desc").Limit(config.MaxRecentItems).Find(&logs).Error
+	// 搜索最近1年的数据
+	tables := getTablesForRecentPeriod()
+
+	// 单表优化
+	if len(tables) == 1 {
+		sql := fmt.Sprintf("SELECT * FROM %s WHERE type = ? OR content LIKE ? ORDER BY id DESC LIMIT ?", tables[0])
+		err = LOG_DB.Raw(sql, keyword, keyword+"%", config.MaxRecentItems).Scan(&logs).Error
+		return logs, err
+	}
+
+	// 多表优化：每个子查询先取 MaxRecentItems 条
+	sqlTemplate := fmt.Sprintf("(SELECT * FROM {TABLE} WHERE type = ? OR content LIKE ? ORDER BY id DESC LIMIT %d)", config.MaxRecentItems)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, keyword, keyword+"%")
+	}
+	args = append(args, config.MaxRecentItems)
+
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ?", unionSQL)
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
 
 func SearchUserLogs(userId int, keyword string) (logs []*Log, err error) {
-	err = LOG_DB.Where("user_id = ? and type = ?", userId, keyword).Order("id desc").Limit(config.MaxRecentItems).Omit("id").Find(&logs).Error
+	// 搜索最近1年的数据
+	tables := getTablesForRecentPeriod()
+
+	// 单表优化
+	if len(tables) == 1 {
+		sql := fmt.Sprintf("SELECT * FROM %s WHERE user_id = ? AND type = ? ORDER BY id DESC LIMIT ?", tables[0])
+		err = LOG_DB.Raw(sql, userId, keyword, config.MaxRecentItems).Scan(&logs).Error
+		return logs, err
+	}
+
+	// 多表优化：每个子查询先取 MaxRecentItems 条
+	sqlTemplate := fmt.Sprintf("(SELECT * FROM {TABLE} WHERE user_id = ? AND type = ? ORDER BY id DESC LIMIT %d)", config.MaxRecentItems)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, userId, keyword)
+	}
+	args = append(args, config.MaxRecentItems)
+
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ?", unionSQL)
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, excludeModels string) (quota int64) {
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
 	}
-	tx := LOG_DB.Table("logs").Select(fmt.Sprintf("%s(sum(quota),0)", ifnull))
+
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "type = ?")
+	args = append(args, LogTypeConsume)
+
 	if username != "" {
-		tx = tx.Where("username = ?", username)
+		conditions = append(conditions, "username = ?")
+		args = append(args, username)
 	}
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		conditions = append(conditions, "token_name = ?")
+		args = append(args, tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		conditions = append(conditions, "created_at >= ?")
+		args = append(args, startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		conditions = append(conditions, "created_at <= ?")
+		args = append(args, endTimestamp)
 	}
 	if modelName != "" {
-		tx = tx.Where("model_name = ?", modelName)
+		conditions = append(conditions, "model_name = ?")
+		args = append(args, modelName)
 	}
 	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
+		conditions = append(conditions, "channel_id = ?")
+		args = append(args, channel)
 	}
 	if excludeModels != "" {
-		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+		conditions = append(conditions, "model_name NOT IN (?)")
+		args = append(args, strings.Split(excludeModels, ","))
 	}
-	tx.Where("type = ?", LogTypeConsume).Scan(&quota)
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf("SELECT %s(sum(quota),0) as quota FROM {TABLE}%s", ifnull, whereClause)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
+	}
+
+	finalSQL := fmt.Sprintf("SELECT %s(sum(quota),0) FROM (%s) AS combined", ifnull, unionSQL)
+	LOG_DB.Raw(finalSQL, finalArgs...).Scan(&quota)
 	return quota
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
 	}
-	tx := LOG_DB.Table("logs").Select(fmt.Sprintf("%s(sum(prompt_tokens),0) + %s(sum(completion_tokens),0)", ifnull, ifnull))
+
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "type = ?")
+	args = append(args, LogTypeConsume)
+
 	if username != "" {
-		tx = tx.Where("username = ?", username)
+		conditions = append(conditions, "username = ?")
+		args = append(args, username)
 	}
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		conditions = append(conditions, "token_name = ?")
+		args = append(args, tokenName)
 	}
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		conditions = append(conditions, "created_at >= ?")
+		args = append(args, startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		conditions = append(conditions, "created_at <= ?")
+		args = append(args, endTimestamp)
 	}
 	if modelName != "" {
-		tx = tx.Where("model_name = ?", modelName)
+		conditions = append(conditions, "model_name = ?")
+		args = append(args, modelName)
 	}
-	tx.Where("type = ?", LogTypeConsume).Scan(&token)
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf("SELECT %s(sum(prompt_tokens),0) + %s(sum(completion_tokens),0) as token FROM {TABLE}%s", ifnull, ifnull, whereClause)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
+	}
+
+	finalSQL := fmt.Sprintf("SELECT %s(sum(token),0) FROM (%s) AS combined", ifnull, unionSQL)
+	LOG_DB.Raw(finalSQL, finalArgs...).Scan(&token)
 	return token
 }
 
 func DeleteOldLog(targetTimestamp int64) (int64, error) {
-	result := LOG_DB.Where("created_at < ?", targetTimestamp).Delete(&Log{})
-	return result.RowsAffected, result.Error
+	// 删除操作需要查询所有已存在的表
+	tables := getAllExistingTables()
+
+	var totalAffected int64
+	for _, table := range tables {
+		result := LOG_DB.Table(table).Where("created_at < ?", targetTimestamp).Delete(&Log{})
+		if result.Error != nil {
+			return totalAffected, result.Error
+		}
+		totalAffected += result.RowsAffected
+	}
+
+	return totalAffected, nil
 }
 
 type LogStatistic struct {
@@ -235,6 +430,8 @@ type LogStatistic struct {
 }
 
 func SearchLogsByDayAndModel(userId, start, end int, excludeModels string) (LogStatistics []*LogStatistic, err error) {
+	tables := getTablesForRange(int64(start), int64(end))
+
 	groupSelect := "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as day"
 
 	if common.UsingPostgreSQL {
@@ -245,48 +442,180 @@ func SearchLogsByDayAndModel(userId, start, end int, excludeModels string) (LogS
 		groupSelect = "strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) as day"
 	}
 
-	var tx *gorm.DB
+	// 构建UNION ALL查询
+	var sqlTemplate string
 	if excludeModels == "" {
-		tx = LOG_DB.Raw(`
-			SELECT `+groupSelect+`,
+		sqlTemplate = fmt.Sprintf(`
+			SELECT %s,
 			model_name, count(1) as request_count,
 			sum(quota) as quota,
 			sum(prompt_tokens) as prompt_tokens,
 			sum(completion_tokens) as completion_tokens
-			FROM logs
+			FROM {TABLE}
 			WHERE type=2
 			AND user_id= ?
 			AND created_at BETWEEN ? AND ?
-			GROUP BY day, model_name
-			ORDER BY day, model_name`, userId, start, end)
+			GROUP BY day, model_name`, groupSelect)
 	} else {
-		tx = LOG_DB.Raw(`
-			SELECT `+groupSelect+`,
+		sqlTemplate = fmt.Sprintf(`
+			SELECT %s,
 			model_name, count(1) as request_count,
 			sum(quota) as quota,
 			sum(prompt_tokens) as prompt_tokens,
 			sum(completion_tokens) as completion_tokens
-			FROM logs
+			FROM {TABLE}
 			WHERE type=2
 			AND user_id= ?
 			AND created_at BETWEEN ? AND ?
 			AND model_name NOT IN (?)
-			GROUP BY day, model_name
-			ORDER BY day, model_name`, userId, start, end, strings.Split(excludeModels, ","))
+			GROUP BY day, model_name`, groupSelect)
 	}
 
-	err = tx.Scan(&LogStatistics).Error
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY day, model_name", unionSQL)
+
+	// 为每个表重复参数
+	var args []interface{}
+	if excludeModels == "" {
+		for range tables {
+			args = append(args, userId, start, end)
+		}
+	} else {
+		for range tables {
+			args = append(args, userId, start, end, strings.Split(excludeModels, ","))
+		}
+	}
+
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&LogStatistics).Error
 
 	return LogStatistics, err
 }
 
-// GetUserTokenModelUsage 统计单个用户token下各个模型在不同时间的使用量
+// GetUserTokenModelUsageWithCache 使用Redis缓存+MySQL混合查询特定用户Token的模型使用统计
+func GetUserTokenModelUsageWithCache(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string) ([]struct {
+	ModelName    string `json:"model_name"`
+	CreatedAt    string `json:"created_at"`
+	Usage        int    `json:"usage"`
+	RequestCount int    `json:"request_count"`
+}, error) {
+	// 如果Redis未启用，直接使用MySQL
+	if !common.RedisEnabled {
+		return GetUserTokenModelUsage(userId, tokenName, startTimestamp, endTimestamp, excludeModels)
+	}
+
+	// 聚合结果：key = model_name + "_" + created_at
+	usageMap := make(map[string]*struct {
+		ModelName    string `json:"model_name"`
+		CreatedAt    string `json:"created_at"`
+		Usage        int    `json:"usage"`
+		RequestCount int    `json:"request_count"`
+	})
+
+	excludeModelSet := make(map[string]bool)
+	if excludeModels != "" {
+		for _, model := range strings.Split(excludeModels, ",") {
+			excludeModelSet[strings.TrimSpace(model)] = true
+		}
+	}
+
+	// 按数据源划分时间范围
+	partition := PartitionByDataSource(startTimestamp, endTimestamp)
+
+	// 1. 查询MySQL区间（历史冷数据 + 今天实时数据）
+	for _, mysqlRange := range partition.MySQLRanges {
+		mysqlStats, err := GetUserTokenModelUsage(userId, tokenName, mysqlRange.Start, mysqlRange.End, excludeModels)
+		if err != nil {
+			return nil, fmt.Errorf("MySQL查询失败[%d-%d]: %w", mysqlRange.Start, mysqlRange.End, err)
+		}
+		for _, stat := range mysqlStats {
+			key := stat.ModelName + "_" + stat.CreatedAt
+			if existing, ok := usageMap[key]; ok {
+				existing.Usage += stat.Usage
+				existing.RequestCount += stat.RequestCount
+			} else {
+				usageMap[key] = &stat
+			}
+		}
+	}
+
+	// 2. 查询Redis区间（昨天到179天前的缓存数据）
+	if len(partition.RedisDates) > 0 {
+		for _, date := range partition.RedisDates {
+			cachedData, err := GetDetailedStatsByDate(userId, date)
+			if err != nil {
+				logger.SysLog(fmt.Sprintf("用户%d日期%s的Redis缓存缺失", userId, date))
+				continue
+			}
+
+			// 从Redis数据中聚合该token的数据（按天）
+			for field, item := range cachedData {
+				parts := strings.SplitN(field, ":", 2)
+				if len(parts) < 2 {
+					continue
+				}
+				fieldTokenName := parts[0]
+				fieldModelName := parts[1]
+
+				// 过滤token和model
+				if fieldTokenName != tokenName {
+					continue
+				}
+				if excludeModelSet[fieldModelName] {
+					continue
+				}
+
+				// 按天聚合（使用00:00:00作为时间戳）
+				createdAt := fmt.Sprintf("%s 00:00:00", date)
+				key := fieldModelName + "_" + createdAt
+				usage := item.PromptTokens + item.CompletionTokens
+
+				if existing, ok := usageMap[key]; ok {
+					existing.Usage += usage
+					existing.RequestCount += item.RequestCount
+				} else {
+					usageMap[key] = &struct {
+						ModelName    string `json:"model_name"`
+						CreatedAt    string `json:"created_at"`
+						Usage        int    `json:"usage"`
+						RequestCount int    `json:"request_count"`
+					}{
+						ModelName:    fieldModelName,
+						CreatedAt:    createdAt,
+						Usage:        usage,
+						RequestCount: item.RequestCount,
+					}
+				}
+			}
+		}
+	}
+
+	// 3. 转换为数组
+	result := make([]struct {
+		ModelName    string `json:"model_name"`
+		CreatedAt    string `json:"created_at"`
+		Usage        int    `json:"usage"`
+		RequestCount int    `json:"request_count"`
+	}, 0, len(usageMap))
+	for _, stat := range usageMap {
+		result = append(result, *stat)
+	}
+
+	// 按 usage (总token数) 降序排序
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Usage > result[j].Usage
+	})
+
+	return result, nil
+}
+
 func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string) ([]struct {
 	ModelName    string `json:"model_name"`
 	CreatedAt    string `json:"created_at"`
 	Usage        int    `json:"usage"`
 	RequestCount int    `json:"request_count"`
 }, error) {
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
@@ -299,27 +628,46 @@ func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, 
 		RequestCount int    `json:"request_count"`
 	}
 
-	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
-		"model_name, date_format(from_unixtime(created_at), '%%Y-%%m-%%d %%H:%%i:%%s') as created_at, "+
-			"%s(sum(prompt_tokens + completion_tokens),0) as `usage`, COUNT(1) as request_count",
-		ifnull))
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
 
-	// 构建查询条件
-	tx = tx.Where("user_id = ? AND token_name = ?", userId, tokenName)
+	conditions = append(conditions, "user_id = ? AND token_name = ?")
+	args = append(args, userId, tokenName)
+
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		conditions = append(conditions, "created_at >= ?")
+		args = append(args, startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		conditions = append(conditions, "created_at <= ?")
+		args = append(args, endTimestamp)
 	}
 	if excludeModels != "" {
-		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+		conditions = append(conditions, "model_name NOT IN (?)")
+		args = append(args, strings.Split(excludeModels, ","))
 	}
 
-	// 分组并执行查询
-	err := tx.Group("model_name, DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:%i:%s')").
-		Scan(&results).Error
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
 
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf(
+		"SELECT model_name, date_format(from_unixtime(created_at), '%%Y-%%m-%%d %%H:%%i:%%s') as created_at, "+
+			"%s(sum(prompt_tokens + completion_tokens),0) as `usage`, COUNT(1) as request_count "+
+			"FROM {TABLE}%s "+
+			"GROUP BY model_name, DATE_FORMAT(FROM_UNIXTIME(created_at), '%%Y-%%m-%%d %%H:%%i:%%s')",
+		ifnull, whereClause)
+
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs", unionSQL)
+
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
+	}
+
+	err := LOG_DB.Raw(finalSQL, finalArgs...).Scan(&results).Error
 	return results, err
 }
 
@@ -334,74 +682,413 @@ type TokenUsageStat struct {
 	LastUsedTime     int64  `json:"last_used_time"`
 }
 
+// splitTimeToHybridWindows 将时间范围拆分为：首日、中间完整自然日、末日
+// 返回：首日范围(startRange)、中间完整自然日列表(middleDays)、末日范围(endRange)
+// 若起止同一天，仅返回首日范围，middleDays 和 endRange 为空
+func splitTimeToHybridWindows(startTs, endTs int64, loc *time.Location) (startRange [2]int64, middleDays []string, endRange [2]int64) {
+	if loc == nil {
+		loc = time.Local
+	}
+	if endTs < startTs {
+		return
+	}
+
+	startT := time.Unix(startTs, 0).In(loc)
+	endT := time.Unix(endTs, 0).In(loc)
+
+	// 同一天
+	if startT.Year() == endT.Year() && startT.YearDay() == endT.YearDay() {
+		startRange = [2]int64{startTs, endTs}
+		return
+	}
+
+	// 首日结束 23:59:59
+	startDayEnd := time.Date(startT.Year(), startT.Month(), startT.Day(), 23, 59, 59, 0, loc)
+	startRange = [2]int64{startTs, startDayEnd.Unix()}
+
+	// 末日开始 00:00:00
+	endDayStart := time.Date(endT.Year(), endT.Month(), endT.Day(), 0, 0, 0, 0, loc)
+	endRange = [2]int64{endDayStart.Unix(), endTs}
+
+	// 中间完整自然日：从首日的下一天00:00开始，到末日（包含）
+	// 首日的下一天
+	nextDayAfterStart := time.Date(startT.Year(), startT.Month(), startT.Day()+1, 0, 0, 0, 0, loc)
+
+	// 遍历中间的完整自然日（包含末日）
+	cur := nextDayAfterStart
+	for !cur.After(endDayStart) {
+		middleDays = append(middleDays, cur.Format("2006-01-02"))
+		cur = cur.AddDate(0, 0, 1)
+	}
+
+	return
+}
+
+// getTokenStatsFromRedisDays 从 Redis 获取指定自然日的 Token 聚合统计
+// userIdOpt 为空表示所有用户；否则仅指定用户
+func getTokenStatsFromRedisDays(userIdOpt *int, dates []string, excludeModels string) (map[string]*TokenUsageStat, error) {
+	statsMap := make(map[string]*TokenUsageStat)
+
+	if userIdOpt != nil {
+		// 单用户
+		if len(dates) == 0 {
+			return statsMap, nil
+		}
+
+		// 查询用户信息（只查一次）
+		var user User
+		if err := DB.Where("id = ?", *userIdOpt).First(&user).Error; err != nil {
+			return statsMap, fmt.Errorf("获取用户信息失败: %w", err)
+		}
+
+		startDate := dates[0]
+		endDate := dates[len(dates)-1]
+		cachedData, err := GetTokenStatsByDateRange(*userIdOpt, startDate, endDate, excludeModels)
+		if err != nil {
+			return statsMap, err
+		}
+
+		// 遍历每个日期的每个token，聚合到最终结果
+		for _, d := range dates {
+			if dayStats, ok := cachedData[d]; ok {
+				for tokenName, item := range dayStats {
+					key := user.Username + ":" + tokenName
+					if existing, ok := statsMap[key]; ok {
+						existing.TotalTokens += item.TotalTokens
+						existing.PromptTokens += item.PromptTokens
+						existing.CompletionTokens += item.CompletionTokens
+						existing.RequestCount += item.RequestCount
+						if item.LastUsedTime > existing.LastUsedTime {
+							existing.LastUsedTime = item.LastUsedTime
+						}
+					} else {
+						statsMap[key] = &TokenUsageStat{
+							Username:         user.Username,
+							TokenName:        tokenName,
+							TotalTokens:      item.TotalTokens,
+							PromptTokens:     item.PromptTokens,
+							CompletionTokens: item.CompletionTokens,
+							RequestCount:     item.RequestCount,
+							LastUsedTime:     item.LastUsedTime,
+						}
+					}
+				}
+			}
+		}
+		return statsMap, nil
+	}
+
+	// 全部用户
+	var users []User
+	if err := DB.Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("获取用户列表失败: %w", err)
+	}
+	if len(dates) == 0 {
+		return statsMap, nil
+	}
+
+	startDate := dates[0]
+	endDate := dates[len(dates)-1]
+
+	for _, user := range users {
+		cachedData, err := GetTokenStatsByDateRange(user.Id, startDate, endDate, excludeModels)
+		if err != nil {
+			logger.SysLog(fmt.Sprintf("获取用户 %d 的Redis数据失败: %s", user.Id, err.Error()))
+			continue
+		}
+
+		missingDates := make([]string, 0)
+		for _, date := range dates {
+			if _, ok := cachedData[date]; !ok {
+				missingDates = append(missingDates, date)
+				continue
+			}
+			for tokenName, item := range cachedData[date] {
+				key := user.Username + ":" + tokenName
+				if existing, ok := statsMap[key]; ok {
+					existing.TotalTokens += item.TotalTokens
+					existing.PromptTokens += item.PromptTokens
+					existing.CompletionTokens += item.CompletionTokens
+					existing.RequestCount += item.RequestCount
+					if item.LastUsedTime > existing.LastUsedTime {
+						existing.LastUsedTime = item.LastUsedTime
+					}
+				} else {
+					statsMap[key] = &TokenUsageStat{
+						Username:         user.Username,
+						TokenName:        tokenName,
+						TotalTokens:      item.TotalTokens,
+						PromptTokens:     item.PromptTokens,
+						CompletionTokens: item.CompletionTokens,
+						RequestCount:     item.RequestCount,
+						LastUsedTime:     item.LastUsedTime,
+					}
+				}
+			}
+		}
+		if len(missingDates) > 0 {
+			logger.SysLog(fmt.Sprintf("用户%d的Redis缓存缺失日期: %v", user.Id, missingDates))
+		}
+	}
+	return statsMap, nil
+}
+
+// GetAllUserTokenStatsWithCache 使用Redis缓存+MySQL混合查询所有用户的Token统计
+func GetAllUserTokenStatsWithCache(startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
+	// 如果Redis未启用，直接使用MySQL
+	if !common.RedisEnabled {
+		return GetAllUserTokenStats(startTimestamp, endTimestamp, excludeModels)
+	}
+
+	statsMap := make(map[string]*TokenUsageStat)
+
+	// 按数据源划分时间范围
+	partition := PartitionByDataSource(startTimestamp, endTimestamp)
+
+	// 1. 查询MySQL区间（历史冷数据 + 今天实时数据）
+	for _, mysqlRange := range partition.MySQLRanges {
+		mysqlStats, err := GetAllUserTokenStats(mysqlRange.Start, mysqlRange.End, excludeModels)
+		if err != nil {
+			return nil, fmt.Errorf("MySQL查询失败[%d-%d]: %w", mysqlRange.Start, mysqlRange.End, err)
+		}
+		for i := range mysqlStats {
+			stat := &mysqlStats[i] // 使用索引访问，避免循环变量重用问题
+			key := stat.Username + ":" + stat.TokenName
+			if existing, ok := statsMap[key]; ok {
+				existing.TotalTokens += stat.TotalTokens
+				existing.PromptTokens += stat.PromptTokens
+				existing.CompletionTokens += stat.CompletionTokens
+				existing.RequestCount += stat.RequestCount
+				if stat.LastUsedTime > existing.LastUsedTime {
+					existing.LastUsedTime = stat.LastUsedTime
+				}
+			} else {
+				statsMap[key] = stat
+			}
+		}
+	}
+
+	// 2. 查询Redis区间（昨天到179天前的缓存数据）
+	if len(partition.RedisDates) > 0 {
+		redisStats, err := getTokenStatsFromRedisDays(nil, partition.RedisDates, excludeModels)
+		if err != nil {
+			logger.SysError(fmt.Sprintf("Redis查询失败，跳过缓存数据: %s", err.Error()))
+		} else {
+			for _, stat := range redisStats {
+				key := stat.Username + ":" + stat.TokenName
+				if existing, ok := statsMap[key]; ok {
+					existing.TotalTokens += stat.TotalTokens
+					existing.PromptTokens += stat.PromptTokens
+					existing.CompletionTokens += stat.CompletionTokens
+					existing.RequestCount += stat.RequestCount
+					if stat.LastUsedTime > existing.LastUsedTime {
+						existing.LastUsedTime = stat.LastUsedTime
+					}
+				} else {
+					statsMap[key] = stat
+				}
+			}
+		}
+	}
+
+	// 3. 转换为数组并排序
+	result := make([]TokenUsageStat, 0, len(statsMap))
+	for _, stat := range statsMap {
+		result = append(result, *stat)
+	}
+
+	// 按 total_tokens 降序排序
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalTokens > result[j].TotalTokens
+	})
+
+	return result, nil
+}
+
 // GetAllUserTokenStats 获取所有用户的Token使用统计
 func GetAllUserTokenStats(startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
 	}
 
-	// 使用链式方法构建查询
-	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
-		"username, token_name, "+
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "type = ? AND created_at BETWEEN ? AND ?")
+	args = append(args, LogTypeConsume, startTimestamp, endTimestamp)
+
+	if excludeModels != "" {
+		conditions = append(conditions, "model_name NOT IN (?)")
+		args = append(args, strings.Split(excludeModels, ","))
+	}
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf(
+		"SELECT username, token_name, "+
 			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
 			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
 			"%s(sum(completion_tokens),0) as completion_tokens, "+
 			"COUNT(id) as request_count, "+
-			"MAX(created_at) as last_used_time",
-		ifnull, ifnull, ifnull))
+			"MAX(created_at) as last_used_time "+
+			"FROM {TABLE}%s "+
+			"GROUP BY username, token_name",
+		ifnull, ifnull, ifnull, whereClause)
 
-	// 构建查询条件
-	tx = tx.Where("type = ? AND created_at BETWEEN ? AND ?", LogTypeConsume, startTimestamp, endTimestamp)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY total_tokens DESC", unionSQL)
 
-	if excludeModels != "" {
-		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
 	}
-
-	// 分组并排序
-	tx = tx.Group("username, token_name").Order("total_tokens DESC")
 
 	// 执行查询
 	var stats []TokenUsageStat
-	err := tx.Scan(&stats).Error
+	err := LOG_DB.Raw(finalSQL, finalArgs...).Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
 
 	return stats, nil
+}
+
+// GetUserTokenStatsWithCache 使用Redis缓存+MySQL混合查询特定用户的Token统计
+func GetUserTokenStatsWithCache(userId int, tokenName string, startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
+	// 如果Redis未启用，直接使用MySQL
+	if !common.RedisEnabled {
+		return GetUserTokenStats(userId, tokenName, startTimestamp, endTimestamp, excludeModels)
+	}
+
+	// 获取用户信息
+	var user User
+	err := DB.Where("id = ?", userId).First(&user).Error
+	if err != nil {
+		return nil, fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	statsMap := make(map[string]*TokenUsageStat)
+
+	// 按数据源划分时间范围
+	partition := PartitionByDataSource(startTimestamp, endTimestamp)
+
+	// 1. 查询MySQL区间（历史冷数据 + 今天实时数据）
+	for _, mysqlRange := range partition.MySQLRanges {
+		mysqlStats, err := GetUserTokenStats(userId, tokenName, mysqlRange.Start, mysqlRange.End, excludeModels)
+		if err != nil {
+			return nil, fmt.Errorf("MySQL查询失败[%d-%d]: %w", mysqlRange.Start, mysqlRange.End, err)
+		}
+		for i := range mysqlStats {
+			stat := &mysqlStats[i] // 使用索引访问，避免循环变量重用问题
+			key := stat.Username + ":" + stat.TokenName
+			if existing, ok := statsMap[key]; ok {
+				existing.TotalTokens += stat.TotalTokens
+				existing.PromptTokens += stat.PromptTokens
+				existing.CompletionTokens += stat.CompletionTokens
+				existing.RequestCount += stat.RequestCount
+				if stat.LastUsedTime > existing.LastUsedTime {
+					existing.LastUsedTime = stat.LastUsedTime
+				}
+			} else {
+				statsMap[key] = stat
+			}
+		}
+	}
+
+	// 2. 查询Redis区间（昨天到179天前的缓存数据）
+	if len(partition.RedisDates) > 0 {
+		redisStats, err := getTokenStatsFromRedisDays(&userId, partition.RedisDates, excludeModels)
+		if err != nil {
+			logger.SysError(fmt.Sprintf("Redis查询失败，跳过缓存数据: %s", err.Error()))
+		} else {
+			for _, stat := range redisStats {
+				// 如果指定了tokenName，只获取该token的数据
+				if tokenName != "" && stat.TokenName != tokenName {
+					continue
+				}
+				key := stat.Username + ":" + stat.TokenName
+				if existing, ok := statsMap[key]; ok {
+					existing.TotalTokens += stat.TotalTokens
+					existing.PromptTokens += stat.PromptTokens
+					existing.CompletionTokens += stat.CompletionTokens
+					existing.RequestCount += stat.RequestCount
+					if stat.LastUsedTime > existing.LastUsedTime {
+						existing.LastUsedTime = stat.LastUsedTime
+					}
+				} else {
+					statsMap[key] = stat
+				}
+			}
+		}
+	}
+
+	// 4. 转换为数组并排序
+	result := make([]TokenUsageStat, 0, len(statsMap))
+	for _, stat := range statsMap {
+		result = append(result, *stat)
+	}
+
+	// 按 total_tokens 降序排序
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalTokens > result[j].TotalTokens
+	})
+
+	return result, nil
 }
 
 // GetUserTokenStats 获取特定用户的Token使用统计
 func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestamp int64, excludeModels string) ([]TokenUsageStat, error) {
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
 	}
 
-	// 使用链式方法构建查询
-	tx := LOG_DB.Table("logs").Select(fmt.Sprintf(
-		"username, token_name, "+
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "user_id = ? AND type = ? AND token_name = ? AND created_at BETWEEN ? AND ?")
+	args = append(args, userId, LogTypeConsume, tokenName, startTimestamp, endTimestamp)
+
+	if excludeModels != "" {
+		conditions = append(conditions, "model_name NOT IN (?)")
+		args = append(args, strings.Split(excludeModels, ","))
+	}
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf(
+		"SELECT username, token_name, "+
 			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
 			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
 			"%s(sum(completion_tokens),0) as completion_tokens, "+
 			"COUNT(id) as request_count, "+
-			"MAX(created_at) as last_used_time",
-		ifnull, ifnull, ifnull))
+			"MAX(created_at) as last_used_time "+
+			"FROM {TABLE}%s "+
+			"GROUP BY username, token_name",
+		ifnull, ifnull, ifnull, whereClause)
 
-	// 构建查询条件
-	tx = tx.Where("user_id = ? AND type = ? AND token_name = ? AND created_at BETWEEN ? AND ?",
-		userId, LogTypeConsume, tokenName, startTimestamp, endTimestamp)
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY total_tokens DESC", unionSQL)
 
-	if excludeModels != "" {
-		tx = tx.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
 	}
-
-	// 分组并排序
-	tx = tx.Group("username, token_name").Order("total_tokens DESC")
 
 	// 执行查询
 	var stats []TokenUsageStat
-	err := tx.Scan(&stats).Error
+	err := LOG_DB.Raw(finalSQL, finalArgs...).Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
@@ -409,37 +1096,146 @@ func GetUserTokenStats(userId int, tokenName string, startTimestamp, endTimestam
 	return stats, nil
 }
 
+// GetTokenUsageByNameWithCache 使用Redis缓存+MySQL混合查询指定Token的使用统计
+func GetTokenUsageByNameWithCache(startTime, endTime int64, userId int, tokenName string, excludeModels string) ([]TokenUsageStat, error) {
+	// 如果Redis未启用，直接使用MySQL
+	if !common.RedisEnabled {
+		return GetTokenUsageByName(startTime, endTime, userId, tokenName, excludeModels)
+	}
+
+	statsMap := make(map[string]*TokenUsageStat)
+
+	// 按数据源划分时间范围
+	partition := PartitionByDataSource(startTime, endTime)
+
+	// 1. 查询MySQL区间（历史冷数据 + 今天实时数据）
+	for _, mysqlRange := range partition.MySQLRanges {
+		mysqlStats, err := GetTokenUsageByName(mysqlRange.Start, mysqlRange.End, userId, tokenName, excludeModels)
+		if err != nil {
+			return nil, fmt.Errorf("MySQL查询失败[%d-%d]: %w", mysqlRange.Start, mysqlRange.End, err)
+		}
+		for i := range mysqlStats {
+			stat := &mysqlStats[i] // 使用索引访问，避免循环变量重用问题
+			key := stat.Username + ":" + stat.TokenName
+			if existing, ok := statsMap[key]; ok {
+				existing.TotalTokens += stat.TotalTokens
+				existing.PromptTokens += stat.PromptTokens
+				existing.CompletionTokens += stat.CompletionTokens
+				existing.RequestCount += stat.RequestCount
+				if stat.LastUsedTime > existing.LastUsedTime {
+					existing.LastUsedTime = stat.LastUsedTime
+				}
+			} else {
+				statsMap[key] = stat
+			}
+		}
+	}
+
+	// 2. 查询Redis区间（昨天到179天前的缓存数据）
+	if len(partition.RedisDates) > 0 {
+		var redisStats map[string]*TokenUsageStat
+		var err error
+
+		if userId != 0 {
+			// 单用户模式
+			redisStats, err = getTokenStatsFromRedisDays(&userId, partition.RedisDates, excludeModels)
+		} else {
+			// 所有用户模式
+			redisStats, err = getTokenStatsFromRedisDays(nil, partition.RedisDates, excludeModels)
+		}
+
+		if err != nil {
+			logger.SysError(fmt.Sprintf("Redis查询失败，跳过缓存数据: %s", err.Error()))
+		} else {
+			for _, stat := range redisStats {
+				// 如果指定了tokenName，只获取该token的数据
+				if tokenName != "" && stat.TokenName != tokenName {
+					continue
+				}
+				key := stat.Username + ":" + stat.TokenName
+				if existing, ok := statsMap[key]; ok {
+					existing.TotalTokens += stat.TotalTokens
+					existing.PromptTokens += stat.PromptTokens
+					existing.CompletionTokens += stat.CompletionTokens
+					existing.RequestCount += stat.RequestCount
+					if stat.LastUsedTime > existing.LastUsedTime {
+						existing.LastUsedTime = stat.LastUsedTime
+					}
+				} else {
+					statsMap[key] = stat
+				}
+			}
+		}
+	}
+
+	// 3. 转换为数组返回
+	result := make([]TokenUsageStat, 0, len(statsMap))
+	for _, stat := range statsMap {
+		result = append(result, *stat)
+	}
+
+	// 按 total_tokens 降序排序
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalTokens > result[j].TotalTokens
+	})
+
+	return result, nil
+}
+
 // GetTokenUsageByName 获取指定时间范围内的Token使用统计
 func GetTokenUsageByName(startTime, endTime int64, userId int, tokenName string, excludeModels string) ([]TokenUsageStat, error) {
+	tables := getTablesForRange(startTime, endTime)
+
 	ifnull := "ifnull"
 	if common.UsingPostgreSQL {
 		ifnull = "COALESCE"
 	}
 
-	var stats []TokenUsageStat
-	query := LOG_DB.Table("logs").Select(fmt.Sprintf(
-		"username, token_name, "+
+	// 构建WHERE条件
+	var conditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "type = ? AND created_at BETWEEN ? AND ?")
+	args = append(args, LogTypeConsume, startTime, endTime)
+
+	if userId > 0 {
+		conditions = append(conditions, "user_id = ?")
+		args = append(args, userId)
+	}
+	if tokenName != "" {
+		conditions = append(conditions, "token_name = ?")
+		args = append(args, tokenName)
+	}
+	if excludeModels != "" {
+		conditions = append(conditions, "model_name NOT IN (?)")
+		args = append(args, strings.Split(excludeModels, ","))
+	}
+
+	whereClause := " WHERE " + strings.Join(conditions, " AND ")
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf(
+		"SELECT username, token_name, "+
 			"%s(sum(prompt_tokens + completion_tokens),0) as total_tokens, "+
 			"%s(sum(prompt_tokens),0) as prompt_tokens, "+
 			"%s(sum(completion_tokens),0) as completion_tokens, "+
 			"COUNT(id) as request_count, "+
-			"MAX(created_at) as last_used_time",
-		ifnull, ifnull, ifnull)).
-		Where("type = ? AND created_at BETWEEN ? AND ?", LogTypeConsume, startTime, endTime).
-		Group("username, token_name").
-		Order("total_tokens DESC")
+			"MAX(created_at) as last_used_time "+
+			"FROM {TABLE}%s "+
+			"GROUP BY username, token_name",
+		ifnull, ifnull, ifnull, whereClause)
 
-	if userId > 0 {
-		query = query.Where("user_id = ?", userId)
-	}
-	if tokenName != "" {
-		query = query.Where("token_name = ?", tokenName)
-	}
-	if excludeModels != "" {
-		query = query.Where("model_name NOT IN (?)", strings.Split(excludeModels, ","))
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY total_tokens DESC", unionSQL)
+
+	// 为每个表重复参数
+	var finalArgs []interface{}
+	for range tables {
+		finalArgs = append(finalArgs, args...)
 	}
 
-	err := query.Scan(&stats).Error
+	var stats []TokenUsageStat
+	err := LOG_DB.Raw(finalSQL, finalArgs...).Scan(&stats).Error
 	return stats, err
 }
 
@@ -484,20 +1280,35 @@ func GetCombinedDailyUsageStats(tokenKeys []string, startTimestamp int64, endTim
 		Count int    `gorm:"column:count"`
 	}
 
-	// 修复SQL：移除重复的type条件
-	tx := LOG_DB.Raw(`
+	// 获取涉及的分表
+	tables := getTablesForRange(startTimestamp, endTimestamp)
+
+	// 构建UNION ALL查询
+	sqlTemplate := fmt.Sprintf(`
+		SELECT %s, COUNT(1) as count_per_token
+		FROM {TABLE}
+		WHERE type = ? 
+		AND token_name IN (?)
+		AND created_at BETWEEN ? AND ?
+		GROUP BY token_name, day`, groupSelect)
+
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, LogTypeConsume, validTokenNames, startTimestamp, endTimestamp)
+	}
+
+	// 最终查询
+	finalSQL := fmt.Sprintf(`
 		SELECT day, SUM(count_per_token) as count
-		FROM (
-			SELECT `+groupSelect+`, COUNT(1) as count_per_token
-			FROM logs
-			WHERE type = ? 
-			AND token_name IN (?)
-			AND created_at BETWEEN ? AND ?
-			GROUP BY token_name, day
-		) as daily_counts
+		FROM (%s) as daily_counts
 		GROUP BY day
 		ORDER BY day ASC
-	`, LogTypeConsume, validTokenNames, startTimestamp, endTimestamp)
+	`, unionSQL)
+
+	tx := LOG_DB.Raw(finalSQL, args...)
 
 	err = tx.Scan(&results).Error
 	if err != nil {
@@ -538,11 +1349,24 @@ func GetCombinedTotalUsage(tokenKeys []string) (int, bool) {
 		return 0, true
 	}
 
+	// 获取最近1年的分表（统计总使用量通常看最近的数据）
+	tables := getTablesForRecentPeriod()
+
+	// 构建UNION ALL查询
+	sqlTemplate := "SELECT COUNT(*) as count FROM {TABLE} WHERE token_name IN (?) AND type = ?"
+	unionSQL := buildUnionSQL(tables, sqlTemplate)
+
+	// 为每个表重复参数
+	var args []interface{}
+	for range tables {
+		args = append(args, validTokenNames, LogTypeConsume)
+	}
+
+	finalSQL := fmt.Sprintf("SELECT SUM(count) as total FROM (%s) AS counts", unionSQL)
+
 	// 查询所有token的总使用次数
 	var totalCount int64
-	err = LOG_DB.Model(&Log{}).
-		Where("token_name IN (?) AND type = ?", validTokenNames, LogTypeConsume).
-		Count(&totalCount).Error
+	err = LOG_DB.Raw(finalSQL, args...).Scan(&totalCount).Error
 
 	if err != nil {
 		return 0, true

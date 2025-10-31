@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/sessions"
@@ -268,21 +269,102 @@ func GetUserDashboard(c *gin.Context) {
 	startOfDay := now.Truncate(24*time.Hour).AddDate(0, 0, -6).Unix()
 	endOfDay := now.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second).Unix()
 
-	dashboards, err := model.SearchLogsByDayAndModel(id, int(startOfDay), int(endOfDay), excludeModels)
+	// 尝试使用Redis缓存+MySQL混合查询
+	dashboards, err := getDashboardDataWithCache(id, int(startOfDay), int(endOfDay), excludeModels)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "无法获取统计信息",
-			"data":    nil,
-		})
-		return
+		// 如果混合查询失败，降级到纯MySQL查询
+		logger.SysError(fmt.Sprintf("混合查询失败，降级到MySQL: %s", err.Error()))
+		dashboards, err = model.SearchLogsByDayAndModel(id, int(startOfDay), int(endOfDay), excludeModels)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法获取统计信息",
+				"data":    nil,
+			})
+			return
+		}
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data":    dashboards,
 	})
 	return
+}
+
+// getDashboardDataWithCache 使用Redis缓存+MySQL的混合查询
+func getDashboardDataWithCache(userId, start, end int, excludeModels string) ([]*model.LogStatistic, error) {
+	// 如果Redis未启用，直接使用MySQL
+	if !common.RedisEnabled {
+		return model.SearchLogsByDayAndModel(userId, start, end, excludeModels)
+	}
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayStartTimestamp := int(todayStart.Unix())
+
+	var allStats []*model.LogStatistic
+
+	// 1. 查询历史数据（从Redis）
+	if start < todayStartTimestamp {
+		historyEnd := todayStartTimestamp - 1
+		if end < todayStartTimestamp {
+			historyEnd = end
+		}
+
+		startDate := time.Unix(int64(start), 0)
+		endDate := time.Unix(int64(historyEnd), 0)
+
+		// 从Redis获取历史数据
+		historyStats, err := model.GetDashboardStatsRange(userId, startDate, endDate)
+		if err != nil {
+			// Redis查询失败，回退到MySQL
+			logger.SysWarn(fmt.Sprintf("从Redis获取历史数据失败，回退到MySQL: %s", err.Error()))
+			return model.SearchLogsByDayAndModel(userId, start, end, excludeModels)
+		}
+
+		allStats = append(allStats, historyStats...)
+	}
+
+	// 2. 查询当天数据（从MySQL）
+	if end >= todayStartTimestamp {
+		todayEndTimestamp := int(now.Unix())
+		todayStats, err := model.SearchLogsByDayAndModel(userId, todayStartTimestamp, todayEndTimestamp, "")
+		if err != nil {
+			logger.SysError(fmt.Sprintf("查询当天数据失败: %s", err.Error()))
+		} else {
+			allStats = append(allStats, todayStats...)
+		}
+	}
+
+	// 3. 应用 excludeModels 过滤
+	if excludeModels != "" {
+		allStats = filterStatsByModels(allStats, excludeModels)
+	}
+
+	return allStats, nil
+}
+
+// filterStatsByModels 按模型名称过滤统计数据
+func filterStatsByModels(stats []*model.LogStatistic, excludeModels string) []*model.LogStatistic {
+	if excludeModels == "" {
+		return stats
+	}
+
+	excludeMap := make(map[string]bool)
+	for _, model := range strings.Split(excludeModels, ",") {
+		excludeMap[strings.TrimSpace(model)] = true
+	}
+
+	var filtered []*model.LogStatistic
+	for _, stat := range stats {
+		if !excludeMap[stat.ModelName] {
+			filtered = append(filtered, stat)
+		}
+	}
+
+	return filtered
 }
 
 func GenerateAccessToken(c *gin.Context) {

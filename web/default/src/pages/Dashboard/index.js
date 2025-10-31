@@ -917,8 +917,7 @@ const Dashboard = () => {
   const fetchTokenUsageByName = async (startDate, endDate, username, tokenName) => {
     const startTimestamp = Math.floor(new Date(startDate).setHours(0, 0, 0, 0) / 1000);
     const endDateObj = new Date(endDate);
-    endDateObj.setDate(endDateObj.getDate() + 1);
-    endDateObj.setHours(0, 0, 0, 0);
+    endDateObj.setHours(23, 59, 59, 999);
     const endTimestamp = Math.floor(endDateObj.getTime() / 1000);
 
     const params = { startTimestamp, endTimestamp };

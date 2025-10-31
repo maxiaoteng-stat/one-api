@@ -189,8 +189,8 @@ func GetUserTokenModelUsage(c *gin.Context) {
 	fmt.Sscanf(startTimestamp, "%d", &startTimestampInt)
 	fmt.Sscanf(endTimestamp, "%d", &endTimestampInt)
 
-	usageData, err := model.GetUserTokenModelUsage(userIdInt, tokenName, startTimestampInt, endTimestampInt, excludeModels)
-	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %v", userId, tokenName, usageData))
+	usageData, err := model.GetUserTokenModelUsageWithCache(userIdInt, tokenName, startTimestampInt, endTimestampInt, excludeModels)
+	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %d records", userId, tokenName, len(usageData)))
 
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -232,14 +232,19 @@ func GetAllUserStatsHandler(c *gin.Context) {
 		return
 	}
 
-	// 获取统计数据
-	stats, err := model.GetAllUserTokenStats(startTimestamp, endTimestamp, excludeModels)
+	// 尝试使用Redis缓存+MySQL混合查询
+	stats, err := model.GetAllUserTokenStatsWithCache(startTimestamp, endTimestamp, excludeModels)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "获取统计数据失败: " + err.Error(),
-		})
-		return
+		// 如果混合查询失败，降级到纯MySQL查询
+		logger.SysError(fmt.Sprintf("Token统计混合查询失败，降级到MySQL: %s", err.Error()))
+		stats, err = model.GetAllUserTokenStats(startTimestamp, endTimestamp, excludeModels)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "获取统计数据失败: " + err.Error(),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -287,14 +292,19 @@ func GetUserTokenStatsHandler(c *gin.Context) {
 		return
 	}
 
-	// 获取用户的统计数据
-	stats, err := model.GetUserTokenStats(userIdInt, tokenName, startTimestamp, endTimestamp, excludeModels)
+	// 尝试使用Redis缓存+MySQL混合查询
+	stats, err := model.GetUserTokenStatsWithCache(userIdInt, tokenName, startTimestamp, endTimestamp, excludeModels)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "获取用户统计数据失败: " + err.Error(),
-		})
-		return
+		// 如果混合查询失败，降级到纯MySQL查询
+		logger.SysError(fmt.Sprintf("用户Token统计混合查询失败，降级到MySQL: %s", err.Error()))
+		stats, err = model.GetUserTokenStats(userIdInt, tokenName, startTimestamp, endTimestamp, excludeModels)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "获取用户统计数据失败: " + err.Error(),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -319,13 +329,19 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 		userIdInt, _ = strconv.Atoi(userId)
 	}
 
-	stats, err := model.GetTokenUsageByName(startTime, endTime, userIdInt, tokenName, excludeModels)
+	// 尝试使用Redis缓存+MySQL混合查询
+	stats, err := model.GetTokenUsageByNameWithCache(startTime, endTime, userIdInt, tokenName, excludeModels)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
+		// 如果混合查询失败，降级到纯MySQL查询
+		logger.SysError(fmt.Sprintf("Token使用查询混合查询失败，降级到MySQL: %s", err.Error()))
+		stats, err = model.GetTokenUsageByName(startTime, endTime, userIdInt, tokenName, excludeModels)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

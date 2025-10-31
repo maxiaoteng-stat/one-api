@@ -43,6 +43,14 @@ func main() {
 	model.InitDB()
 	model.InitLogDB()
 
+	// Initialize Log Sharding
+	if err := model.InitLogSharding(); err != nil {
+		logger.FatalLog("failed to initialize log sharding: " + err.Error())
+	}
+
+	// Start table maintenance task
+	go model.StartTableMaintenanceTask()
+
 	var err error
 	err = model.CreateRootAccountIfNeed()
 	if err != nil {
@@ -141,6 +149,11 @@ func main() {
 	model.InitRateLimitCache()
 	// 初始化负载均衡轮询策略
 	model.InitBalanceStrategies()
+
+	// 启动Dashboard缓存同步任务
+	if common.RedisEnabled {
+		go model.StartDashboardCacheSync()
+	}
 
 	logger.SysLogf("server started on http://localhost:%s", port)
 	err = server.Run(":" + port)
