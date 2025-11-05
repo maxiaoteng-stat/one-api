@@ -134,14 +134,3 @@ func PartitionByDataSource(startTimestamp, endTimestamp int64) *DataSourcePartit
 
 	return result
 }
-
-// MergeTimeRanges 合并多个时间范围（如果需要用一条SQL查询）
-func MergeTimeRanges(ranges []TimeRange) []TimeRange {
-	if len(ranges) == 0 {
-		return ranges
-	}
-
-	// 简单情况：如果只有一个范围或者范围不连续，返回原数组
-	// 可以根据需要实现更复杂的合并逻辑
-	return ranges
-}

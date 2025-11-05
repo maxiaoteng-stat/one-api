@@ -109,12 +109,7 @@ func GetDetailedStatsByDateRange(userId int, startDate, endDate time.Time) (map[
 	result := make(map[string]map[string]*DetailedStatItem)
 	current := startDate
 
-	adjustedEndDate := endDate
-	// if endDate.Hour() == 0 && endDate.Minute() == 0 && endDate.Second() == 0 {
-	// 	adjustedEndDate = endDate.AddDate(0, 0, -1)
-	// }
-
-	for current.Before(adjustedEndDate) || current.Equal(adjustedEndDate) {
+	for current.Before(endDate) || current.Equal(endDate) {
 		dateStr := current.Format("2006-01-02")
 		stats, err := GetDetailedStatsByDate(userId, dateStr)
 		if err != nil {
@@ -177,6 +172,8 @@ func AggregateTokenStats(detailedStats map[string]map[string]*DetailedStatItem) 
 				if item.LastUsedTime > existing.LastUsedTime {
 					existing.LastUsedTime = item.LastUsedTime
 				}
+				// 更新 TotalTokens
+				existing.TotalTokens = existing.PromptTokens + existing.CompletionTokens
 			} else {
 				statsMap[item.TokenName] = &TokenStatItem{
 					TotalTokens:      item.PromptTokens + item.CompletionTokens,
@@ -187,11 +184,6 @@ func AggregateTokenStats(detailedStats map[string]map[string]*DetailedStatItem) 
 				}
 			}
 		}
-	}
-
-	// 更新 TotalTokens
-	for _, stat := range statsMap {
-		stat.TotalTokens = stat.PromptTokens + stat.CompletionTokens
 	}
 
 	return statsMap
@@ -207,16 +199,26 @@ func GetDashboardStatsRange(userId int, startDate, endDate time.Time) ([]*LogSta
 	return AggregateDashboardStats(detailedStats), nil
 }
 
-// GetTokenStatsByDateRange 获取Token统计（支持 excludeModels 过滤）
-func GetTokenStatsByDateRange(userId int, startDate, endDate string, excludeModels string) (map[string]map[string]*TokenStatItem, error) {
+// parseDateRange 解析日期字符串为时间范围（辅助函数）
+func parseDateRange(startDate, endDate string) (time.Time, time.Time, error) {
 	startTime, err := time.Parse("2006-01-02", startDate)
 	if err != nil {
-		return nil, fmt.Errorf("解析开始日期失败: %w", err)
+		return time.Time{}, time.Time{}, fmt.Errorf("解析开始日期失败: %w", err)
 	}
 
 	endTime, err := time.Parse("2006-01-02", endDate)
 	if err != nil {
-		return nil, fmt.Errorf("解析结束日期失败: %w", err)
+		return time.Time{}, time.Time{}, fmt.Errorf("解析结束日期失败: %w", err)
+	}
+
+	return startTime, endTime, nil
+}
+
+// GetTokenStatsByDateRange 获取Token统计（支持 excludeModels 过滤）
+func GetTokenStatsByDateRange(userId int, startDate, endDate string, excludeModels string) (map[string]map[string]*TokenStatItem, error) {
+	startTime, endTime, err := parseDateRange(startDate, endDate)
+	if err != nil {
+		return nil, err
 	}
 
 	detailedStats, err := GetDetailedStatsByDateRange(userId, startTime, endTime)
@@ -249,6 +251,8 @@ func GetTokenStatsByDateRange(userId int, startDate, endDate string, excludeMode
 				if item.LastUsedTime > existing.LastUsedTime {
 					existing.LastUsedTime = item.LastUsedTime
 				}
+				// 更新 TotalTokens
+				existing.TotalTokens = existing.PromptTokens + existing.CompletionTokens
 			} else {
 				tokenStats[item.TokenName] = &TokenStatItem{
 					TotalTokens:      item.PromptTokens + item.CompletionTokens,
@@ -259,10 +263,6 @@ func GetTokenStatsByDateRange(userId int, startDate, endDate string, excludeMode
 				}
 			}
 		}
-		// 更新 TotalTokens
-		for _, stat := range tokenStats {
-			stat.TotalTokens = stat.PromptTokens + stat.CompletionTokens
-		}
 		result[date] = tokenStats
 	}
 
@@ -271,14 +271,9 @@ func GetTokenStatsByDateRange(userId int, startDate, endDate string, excludeMode
 
 // GetTokenStatsByDateRangeAggregated 获取聚合的Token统计（跨所有日期）
 func GetTokenStatsByDateRangeAggregated(userId int, startDate, endDate string) (map[string]*TokenStatItem, error) {
-	startTime, err := time.Parse("2006-01-02", startDate)
+	startTime, endTime, err := parseDateRange(startDate, endDate)
 	if err != nil {
-		return nil, fmt.Errorf("解析开始日期失败: %w", err)
-	}
-
-	endTime, err := time.Parse("2006-01-02", endDate)
-	if err != nil {
-		return nil, fmt.Errorf("解析结束日期失败: %w", err)
+		return nil, err
 	}
 
 	detailedStats, err := GetDetailedStatsByDateRange(userId, startTime, endTime)

@@ -491,124 +491,7 @@ func SearchLogsByDayAndModel(userId, start, end int, excludeModels string) (LogS
 	return LogStatistics, err
 }
 
-// GetUserTokenModelUsageWithCache 使用Redis缓存+MySQL混合查询特定用户Token的模型使用统计
-func GetUserTokenModelUsageWithCache(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string) ([]struct {
-	ModelName    string `json:"model_name"`
-	CreatedAt    string `json:"created_at"`
-	Usage        int    `json:"usage"`
-	RequestCount int    `json:"request_count"`
-}, error) {
-	// 如果Redis未启用，直接使用MySQL
-	if !common.RedisEnabled {
-		return GetUserTokenModelUsage(userId, tokenName, startTimestamp, endTimestamp, excludeModels)
-	}
-
-	// 聚合结果：key = model_name + "_" + created_at
-	usageMap := make(map[string]*struct {
-		ModelName    string `json:"model_name"`
-		CreatedAt    string `json:"created_at"`
-		Usage        int    `json:"usage"`
-		RequestCount int    `json:"request_count"`
-	})
-
-	excludeModelSet := make(map[string]bool)
-	if excludeModels != "" {
-		for _, model := range strings.Split(excludeModels, ",") {
-			excludeModelSet[strings.TrimSpace(model)] = true
-		}
-	}
-
-	// 按数据源划分时间范围
-	partition := PartitionByDataSource(startTimestamp, endTimestamp)
-
-	// 1. 查询MySQL区间（历史冷数据 + 今天实时数据）
-	for _, mysqlRange := range partition.MySQLRanges {
-		mysqlStats, err := GetUserTokenModelUsage(userId, tokenName, mysqlRange.Start, mysqlRange.End, excludeModels)
-		if err != nil {
-			return nil, fmt.Errorf("MySQL查询失败[%d-%d]: %w", mysqlRange.Start, mysqlRange.End, err)
-		}
-		for _, stat := range mysqlStats {
-			key := stat.ModelName + "_" + stat.CreatedAt
-			if existing, ok := usageMap[key]; ok {
-				existing.Usage += stat.Usage
-				existing.RequestCount += stat.RequestCount
-			} else {
-				usageMap[key] = &stat
-			}
-		}
-	}
-
-	// 2. 查询Redis区间（昨天到179天前的缓存数据）
-	if len(partition.RedisDates) > 0 {
-		for _, date := range partition.RedisDates {
-			cachedData, err := GetDetailedStatsByDate(userId, date)
-			if err != nil {
-				logger.SysLog(fmt.Sprintf("用户%d日期%s的Redis缓存缺失", userId, date))
-				continue
-			}
-
-			// 从Redis数据中聚合该token的数据（按天）
-			for field, item := range cachedData {
-				parts := strings.SplitN(field, ":", 2)
-				if len(parts) < 2 {
-					continue
-				}
-				fieldTokenName := parts[0]
-				fieldModelName := parts[1]
-
-				// 过滤token和model
-				if fieldTokenName != tokenName {
-					continue
-				}
-				if excludeModelSet[fieldModelName] {
-					continue
-				}
-
-				// 按天聚合（使用00:00:00作为时间戳）
-				createdAt := fmt.Sprintf("%s 00:00:00", date)
-				key := fieldModelName + "_" + createdAt
-				usage := item.PromptTokens + item.CompletionTokens
-
-				if existing, ok := usageMap[key]; ok {
-					existing.Usage += usage
-					existing.RequestCount += item.RequestCount
-				} else {
-					usageMap[key] = &struct {
-						ModelName    string `json:"model_name"`
-						CreatedAt    string `json:"created_at"`
-						Usage        int    `json:"usage"`
-						RequestCount int    `json:"request_count"`
-					}{
-						ModelName:    fieldModelName,
-						CreatedAt:    createdAt,
-						Usage:        usage,
-						RequestCount: item.RequestCount,
-					}
-				}
-			}
-		}
-	}
-
-	// 3. 转换为数组
-	result := make([]struct {
-		ModelName    string `json:"model_name"`
-		CreatedAt    string `json:"created_at"`
-		Usage        int    `json:"usage"`
-		RequestCount int    `json:"request_count"`
-	}, 0, len(usageMap))
-	for _, stat := range usageMap {
-		result = append(result, *stat)
-	}
-
-	// 按 usage (总token数) 降序排序
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Usage > result[j].Usage
-	})
-
-	return result, nil
-}
-
-func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string) ([]struct {
+func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, endTimestamp int64, excludeModels string, timeInterval string) ([]struct {
 	ModelName    string `json:"model_name"`
 	CreatedAt    string `json:"created_at"`
 	Usage        int    `json:"usage"`
@@ -650,13 +533,23 @@ func GetUserTokenModelUsage(userId int, tokenName string, startTimestamp int64, 
 
 	whereClause := " WHERE " + strings.Join(conditions, " AND ")
 
+	// 根据 timeInterval 选择不同的分组方式
+	var dateFormatExpr string
+	if timeInterval == "hour" {
+		// 按小时分组
+		dateFormatExpr = "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:00:00')"
+	} else {
+		// 按天分组（默认）
+		dateFormatExpr = "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d 00:00:00')"
+	}
+
 	// 构建UNION ALL查询
 	sqlTemplate := fmt.Sprintf(
-		"SELECT model_name, date_format(from_unixtime(created_at), '%%Y-%%m-%%d %%H:%%i:%%s') as created_at, "+
+		"SELECT model_name, %s as created_at, "+
 			"%s(sum(prompt_tokens + completion_tokens),0) as `usage`, COUNT(1) as request_count "+
 			"FROM {TABLE}%s "+
-			"GROUP BY model_name, DATE_FORMAT(FROM_UNIXTIME(created_at), '%%Y-%%m-%%d %%H:%%i:%%s')",
-		ifnull, whereClause)
+			"GROUP BY model_name, %s",
+		dateFormatExpr, ifnull, whereClause, dateFormatExpr)
 
 	unionSQL := buildUnionSQL(tables, sqlTemplate)
 	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs", unionSQL)
@@ -1287,9 +1180,9 @@ func GetCombinedDailyUsageStats(tokenKeys []string, startTimestamp int64, endTim
 	sqlTemplate := fmt.Sprintf(`
 		SELECT %s, COUNT(1) as count_per_token
 		FROM {TABLE}
-		WHERE type = ? 
-		AND token_name IN (?)
-		AND created_at BETWEEN ? AND ?
+			WHERE type = ? 
+			AND token_name IN (?)
+			AND created_at BETWEEN ? AND ?
 		GROUP BY token_name, day`, groupSelect)
 
 	unionSQL := buildUnionSQL(tables, sqlTemplate)

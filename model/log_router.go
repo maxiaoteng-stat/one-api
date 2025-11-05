@@ -65,9 +65,6 @@ func GetTableNamesByDateRange(startDate, endDate time.Time) []string {
 			// 从内存缓存检查表是否存在（不再查询数据库）
 			if IsTableInCache(tableName) {
 				result = append(result, tableName)
-			} else {
-				// 如果缓存中没有，记录日志
-				logger.SysLog(fmt.Sprintf("分表 %s 不在缓存中，已忽略", tableName))
 			}
 		}
 	}

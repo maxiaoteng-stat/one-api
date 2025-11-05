@@ -181,6 +181,12 @@ func GetUserTokenModelUsage(c *gin.Context) {
 	startTimestamp := c.Query("startTimestamp")
 	endTimestamp := c.Query("endTimestamp")
 	excludeModels := c.Query("excludeModels")
+	timeInterval := c.Query("timeInterval")
+
+	// 如果未指定时间间隔，默认为天
+	if timeInterval == "" {
+		timeInterval = "day"
+	}
 
 	// 解析参数
 	var userIdInt int
@@ -189,16 +195,19 @@ func GetUserTokenModelUsage(c *gin.Context) {
 	fmt.Sscanf(startTimestamp, "%d", &startTimestampInt)
 	fmt.Sscanf(endTimestamp, "%d", &endTimestampInt)
 
-	usageData, err := model.GetUserTokenModelUsageWithCache(userIdInt, tokenName, startTimestampInt, endTimestampInt, excludeModels)
-	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %d records", userId, tokenName, len(usageData)))
+	// 直接使用MySQL查询，支持按小时/按天查询
+	usageData, err := model.GetUserTokenModelUsage(userIdInt, tokenName, startTimestampInt, endTimestampInt, excludeModels, timeInterval)
 
 	if err != nil {
+		logger.Error(c.Request.Context(), fmt.Sprintf("GetUserTokenModelUsage failed: %s", err.Error()))
 		c.JSON(500, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
+
+	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %d records", userId, tokenName, len(usageData)))
 
 	c.JSON(200, gin.H{
 		"success": true,

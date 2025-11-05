@@ -275,14 +275,14 @@ func GetUserDashboard(c *gin.Context) {
 		// 如果混合查询失败，降级到纯MySQL查询
 		logger.SysError(fmt.Sprintf("混合查询失败，降级到MySQL: %s", err.Error()))
 		dashboards, err = model.SearchLogsByDayAndModel(id, int(startOfDay), int(endOfDay), excludeModels)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "无法获取统计信息",
-				"data":    nil,
-			})
-			return
-		}
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无法获取统计信息",
+			"data":    nil,
+		})
+		return
+	}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

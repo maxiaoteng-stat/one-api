@@ -678,7 +678,7 @@ const Dashboard = () => {
   // 获取Token使用数据
   const fetchTokenUsageData = async (startTimestamp, endTimestamp) => {
     const { userId, tokenName } = formValues;
-    const params = { userId, tokenName, startTimestamp, endTimestamp };
+    const params = { userId, tokenName, startTimestamp, endTimestamp, timeInterval };
     const url = utils.buildApiUrl('/api/log/model/usage', params, modelMappingValues);
     
     await utils.fetchApi(url, 
