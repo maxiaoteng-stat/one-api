@@ -70,6 +70,7 @@ type GeneralOpenAIRequest struct {
 	// Rerank
 	Query     any      `json:"query,omitempty"`
 	Documents []string `json:"documents,omitempty"`
+	Texts     []string `json:"texts,omitempty"`
 	//qwen3
 	ExtraBody          interface{} `json:"extra_body,omitempty"`
 	ChatTemplateKwargs interface{} `json:"chat_template_kwargs,omitempty"`

@@ -13,3 +13,8 @@ cmd.md
 /one-api
 temp
 .DS_Store
+.dockerignore
+one-api.tar
+oneapi.tar
+*_debug_bin*
+/testoneapi

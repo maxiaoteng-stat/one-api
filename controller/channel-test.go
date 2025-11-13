@@ -86,6 +86,10 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 			request.Query = request.Messages[0].Content
 		}
 
+		if request.Texts == nil || len(request.Texts) == 0 {
+			request.Texts = []string{"This is Rerank testing."}
+		}
+
 		// 如果没有documents字段，添加一个示例文档
 		if request.Documents == nil || len(request.Documents) == 0 {
 			request.Documents = []string{"This is Rerank testing."}

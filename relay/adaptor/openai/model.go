@@ -143,3 +143,34 @@ type CompletionsStreamResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
+
+// RerankDocument 表示重排序文档
+type RerankDocument struct {
+	Text       string `json:"text"`
+	MultiModal *any   `json:"multi_modal,omitempty"`
+}
+
+// RerankResult 表示单个重排序结果
+type RerankResult struct {
+	Index          int             `json:"index"`
+	Score          float64         `json:"score,omitempty"`           // 简单格式使用 score
+	RelevanceScore float64         `json:"relevance_score,omitempty"` // 复杂格式使用 relevance_score
+	Document       *RerankDocument `json:"document,omitempty"`        // 复杂格式包含文档信息
+}
+
+// RerankUsage 表示 rerank 的 token 使用情况（灵活格式）
+type RerankUsage struct {
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	TotalTokens      int `json:"total_tokens,omitempty"`
+}
+
+// RerankResponse 表示完整的 rerank 响应
+type RerankResponse struct {
+	Id      string         `json:"id,omitempty"`
+	Model   string         `json:"model,omitempty"`
+	Usage   RerankUsage    `json:"usage"`
+	Results []RerankResult `json:"results"`
+	Object  string         `json:"object,omitempty"`
+	Error   *model.Error   `json:"error,omitempty"`
+}

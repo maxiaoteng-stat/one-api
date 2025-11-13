@@ -188,6 +188,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, meta *meta.Met
 		switch meta.Mode {
 		case relaymode.ImagesGenerations:
 			err, _ = ImageHandler(c, resp)
+		case relaymode.Rerank:
+			err, usage = RerankHandler(c, resp, meta.PromptTokens, meta.ActualModelName)
 		default:
 			err, usage = Handler(c, resp, meta.PromptTokens, meta.ActualModelName)
 		}

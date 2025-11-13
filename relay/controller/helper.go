@@ -57,6 +57,11 @@ func getPromptTokens(textRequest *relaymodel.GeneralOpenAIRequest, relayMode int
 		return openai.CountTokenInput(textRequest.Prompt, textRequest.Model)
 	case relaymode.Moderations:
 		return openai.CountTokenInput(textRequest.Input, textRequest.Model)
+	case relaymode.Rerank:
+		// 输入为 query + texts，按你的模型名计数
+		q := openai.CountTokenInput(textRequest.Query, textRequest.Model)
+		t := openai.CountTokenInput(textRequest.Texts, textRequest.Model)
+		return q + t
 	}
 	return 0
 }
