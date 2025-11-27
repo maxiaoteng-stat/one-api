@@ -68,13 +68,14 @@ export default function Token() {
 
   const searchTokens = async (event) => {
     event.preventDefault();
-    if (searchKeyword === '') {
+    if (searchKeyword.trim() === '') {
       await loadTokens(0);
       setActivePage(0);
       return;
     }
     setSearching(true);
-    const res = await API.get(`/api/token/search?keyword=${searchKeyword}`);
+    const keyword = searchKeyword.trim();
+    const res = await API.get(`/api/token/search?keyword=${keyword}`);
     const { success, message, data } = res.data;
     if (success) {
       setTokens(data);
@@ -161,7 +162,7 @@ export default function Token() {
       </Stack>
       <Card>
         <Box component="form" onSubmit={searchTokens} noValidate sx={{marginTop: 2}}>
-          <TableToolBar filterName={searchKeyword} handleFilterName={handleSearchKeyword} placeholder={'搜索令牌的名称...'} />
+          <TableToolBar filterName={searchKeyword} handleFilterName={handleSearchKeyword} placeholder={'搜索令牌名称或 Key...'} />
         </Box>
         <Toolbar
           sx={{

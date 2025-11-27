@@ -159,7 +159,7 @@
   },
   "token": {
     "title": "令牌管理",
-    "search": "搜索令牌的名称 ...",
+    "search": "搜索令牌的名称或Key ...",
     "table": {
       "name": "名称",
       "status": "状态",

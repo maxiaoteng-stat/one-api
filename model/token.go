@@ -55,7 +55,12 @@ func GetAllUserTokens(userId int, startIdx int, num int, order string) ([]*Token
 }
 
 func SearchUserTokens(userId int, keyword string) (tokens []*Token, err error) {
-	err = DB.Where("user_id = ?", userId).Where("name LIKE ?", keyword+"%").Find(&tokens).Error
+	query := DB.Where("user_id = ?", userId)
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		query = query.Where(DB.Where("name LIKE ?", likeKeyword).Or("`key` LIKE ?", likeKeyword))
+	}
+	err = query.Find(&tokens).Error
 	return tokens, err
 }
 
