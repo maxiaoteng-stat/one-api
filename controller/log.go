@@ -33,6 +33,10 @@ func GetAllLogs(c *gin.Context) {
 		})
 		return
 	}
+	// 确保 logs 不为 nil，避免前台报错
+	if logs == nil {
+		logs = []*model.Log{}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -60,6 +64,10 @@ func GetUserLogs(c *gin.Context) {
 		})
 		return
 	}
+	// 确保 logs 不为 nil，避免前台报错
+	if logs == nil {
+		logs = []*model.Log{}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -77,6 +85,10 @@ func SearchAllLogs(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+	// 确保 logs 不为 nil，避免前台报错
+	if logs == nil {
+		logs = []*model.Log{}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -96,6 +108,10 @@ func SearchUserLogs(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+	// 确保 logs 不为 nil，避免前台报错
+	if logs == nil {
+		logs = []*model.Log{}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -209,6 +225,16 @@ func GetUserTokenModelUsage(c *gin.Context) {
 
 	logger.Info(c.Request.Context(), fmt.Sprintf("Usage data for user %s with token %s: %d records", userId, tokenName, len(usageData)))
 
+	// 确保 usageData 不为 nil，避免前台报错
+	if usageData == nil {
+		usageData = []struct {
+			ModelName    string `json:"model_name"`
+			CreatedAt    string `json:"created_at"`
+			Usage        int    `json:"usage"`
+			RequestCount int    `json:"request_count"`
+		}{}
+	}
+
 	c.JSON(200, gin.H{
 		"success": true,
 		"data":    usageData,
@@ -254,6 +280,11 @@ func GetAllUserStatsHandler(c *gin.Context) {
 			})
 			return
 		}
+	}
+
+	// 确保 stats 不为 nil，避免前台报错
+	if stats == nil {
+		stats = []model.TokenUsageStat{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -316,6 +347,11 @@ func GetUserTokenStatsHandler(c *gin.Context) {
 		}
 	}
 
+	// 确保 stats 不为 nil，避免前台报错
+	if stats == nil {
+		stats = []model.TokenUsageStat{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -351,6 +387,11 @@ func GetTokenUsageByNameHandler(c *gin.Context) {
 			})
 			return
 		}
+	}
+
+	// 确保 stats 不为 nil，避免前台报错
+	if stats == nil {
+		stats = []model.TokenUsageStat{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -419,6 +460,11 @@ func GetDailyUsageStats(c *gin.Context) {
 			"data": nil,
 		})
 		return
+	}
+
+	// 确保 usageData 不为 nil，避免前台报错
+	if usageData == nil {
+		usageData = make(map[string]int)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
