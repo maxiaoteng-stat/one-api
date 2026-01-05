@@ -173,7 +173,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 	args = append(args, num, startIdx)
 
-	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ? OFFSET ?", unionSQL)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", unionSQL)
 	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
@@ -231,7 +231,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	}
 	args = append(args, num, startIdx)
 
-	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ? OFFSET ?", unionSQL)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", unionSQL)
 	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
@@ -258,7 +258,7 @@ func SearchAllLogs(keyword string) (logs []*Log, err error) {
 	}
 	args = append(args, config.MaxRecentItems)
 
-	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ?", unionSQL)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY created_at DESC, id DESC LIMIT ?", unionSQL)
 	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
@@ -285,7 +285,7 @@ func SearchUserLogs(userId int, keyword string) (logs []*Log, err error) {
 	}
 	args = append(args, config.MaxRecentItems)
 
-	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY id DESC LIMIT ?", unionSQL)
+	finalSQL := fmt.Sprintf("SELECT * FROM (%s) AS logs ORDER BY created_at DESC, id DESC LIMIT ?", unionSQL)
 	err = LOG_DB.Raw(finalSQL, args...).Scan(&logs).Error
 	return logs, err
 }
