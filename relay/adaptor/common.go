@@ -28,6 +28,7 @@ func DoRequestHelper(a Adaptor, c *gin.Context, meta *meta.Meta, requestBody io.
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	req = req.WithContext(c.Request.Context())
 	err = a.SetupRequestHeader(c, req, meta)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)

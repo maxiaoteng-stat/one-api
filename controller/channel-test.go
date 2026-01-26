@@ -110,6 +110,9 @@ func testChannel(ctx context.Context, channel *model.Channel, request *relaymode
 		Body:   nil,
 		Header: make(http.Header),
 	}
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c.Request = c.Request.WithContext(timeoutCtx)
 
 	c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -352,6 +355,9 @@ func testChannels(ctx context.Context, notify bool, scope string) error {
 	testAllChannelsLock.Unlock()
 	channels, err := model.GetAllChannels(0, 0, scope)
 	if err != nil {
+		testAllChannelsLock.Lock()
+		testAllChannelsRunning = false
+		testAllChannelsLock.Unlock()
 		return err
 	}
 	var disableThreshold = int64(config.ChannelDisableThreshold * 1000)
@@ -463,7 +469,10 @@ func AutomaticallyTestChannels(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Minute)
 		logger.SysLog("testing all channels")
-		_ = testChannels(ctx, false, "enabled")
+		err := testChannels(ctx, false, "enabled")
+		if err != nil {
+			logger.SysError(fmt.Sprintf("failed to test all channels: %s", err.Error()))
+		}
 		logger.SysLog("channel test finished")
 	}
 }
